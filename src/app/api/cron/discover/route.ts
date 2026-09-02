@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { runDiscovery } from '@/pipeline/discover';
 import { sendAlert } from '@/lib/alerts';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 // Optional HTTP trigger for the discovery pipeline, for setups where cron lives outside
 // the container (e.g. an external scheduler pinging the running app). Protected by
 // CRON_SECRET as a bearer token. The recommended default is still a scheduled job that

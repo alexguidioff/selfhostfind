@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { isAdminAuthenticated } from '@/lib/auth';
 
+// Tell Next.js to never try to pre-render this at build time. The route is fully
+// request-driven (reads body, authenticates, then writes to the DB), and Vercel's
+// build will fail with "Failed to collect page data" if we don't.
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 // Fields an admin is allowed to hand-correct. Editing any of these marks it as a manual
 // override in Application.manualOverrides so the discovery pipeline never silently reverts it.
 const EDITABLE_FIELDS = new Set([
