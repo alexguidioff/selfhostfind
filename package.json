@@ -23,7 +23,7 @@
     "snapshot": "tsx --env-file-if-exists=.env src/pipeline/snapshot.ts"
   },
   "dependencies": {
-    "@prisma/client": "^5.20.0",
+    "@prisma/client": "^7.10.0",
     "next": "^14.2.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
