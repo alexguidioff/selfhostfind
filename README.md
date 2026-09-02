@@ -297,3 +297,28 @@ Docker support, or goes stale loses its auto-verified badge automatically. `Manu
 A repo the `reconcile` job finds deleted or transferred out of reach is never presented as
 fact either: it's dropped from the public catalog rather than left showing stale data (see
 "Keeping the catalog honest" above).
+
+## How to get indexed by search engines and AI crawlers
+
+The site is built discoverable by default (sitemap, robots, JSON-LD, llms.txt), but you need
+to register it with the crawlers before they start visiting. The verification tags are
+picked up from Vercel env vars:
+
+| Env var | Where to get the value |
+|---|---|
+| `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` | Google Search Console → URL Prefix verification → HTML tag |
+| `NEXT_PUBLIC_BING_SITE_VERIFICATION`  | Bing Webmaster Tools → URL Prefix verification → HTML tag |
+
+Steps once the site is live:
+
+1. **Google Search Console** — add `https://<your-domain>` as a URL prefix, paste the
+   `google-site-verification` value into the env var above, redeploy, click Verify in GSC,
+   then submit `/sitemap.xml` under Sitemaps.
+2. **Bing Webmaster Tools** — same flow, with the Bing value.
+3. **AI crawlers** — they discover `llms.txt` and `llms-full.txt` on their own. Nothing to
+   register, but you can submit the URLs through the respective provider consoles
+   (OpenAI, Anthropic, Perplexity all have an "index my site" form for site owners).
+4. **Force a re-crawl** of the most important pages via GSC → URL Inspection → "Request
+   Indexing" for the homepage, the top 3 category pages, and the top 5 app pages.
+
+Expect 2-7 days for the first pages to land in Google, 1-3 days for Bing.

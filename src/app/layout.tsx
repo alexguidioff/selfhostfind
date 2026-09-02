@@ -67,6 +67,8 @@ export const metadata: Metadata = {
     // Google Search Console verification — paste the value Google gives you here, or set
     // NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION in Vercel env vars and it'll be picked up.
     'google-site-verification': process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION ?? '',
+    // Bing Webmaster Tools verification — same pattern as Google.
+    'msvalidate.01': process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION ?? '',
   },
 };
 
