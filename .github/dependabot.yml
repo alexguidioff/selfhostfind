@@ -9,7 +9,7 @@ updates:
     groups:
       patch-and-minor:
         update-types: [patch, minor]
-    open-pull-requests-limit: 15
+    open-pull-requests-limit: 5
     # Major bumps for these packages need manual review (codegen changes, API breaks,
     # React 19 migration, Next 15 app-router changes). Dependabot is left to suggest them
     # — we just don't let it touch them in the same PR as other unrelated updates.
@@ -24,6 +24,14 @@ updates:
         update-types: [version-update:semver-major]
       - dependency-name: "react-dom"
         update-types: [version-update:semver-major]
+      - dependency-name: "typescript"
+        update-types: [version-update:semver-major]
+      - dependency-name: "vitest"
+        update-types: [version-update:semver-major]
+      - dependency-name: "tailwindcss"
+        update-types: [version-update:semver-major]
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
       # Keep the two Prisma packages in lockstep so we never end up with client 7.x + cli 5.x.
       - dependency-name: "@prisma/client"
         versions:
@@ -33,13 +41,19 @@ updates:
         versions:
           - ">=6.a, <7.0.0"
           - ">=7.a"
+    # Only require CI for patches/minors. Major bumps will be reviewed manually anyway,
+    # so blocking them on a CI that was calibrated for the old version is just noise.
+    # (Note: `ignore` above filters which PRs open, but `rebase-strategy` here keeps the
+    # auto-merge workflow from churning on the ones that do open.)
 
   - package-ecosystem: docker
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 2
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 2

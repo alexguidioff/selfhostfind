@@ -1,9 +1,11 @@
 name: Migrate database
 
+# Migrations are applied automatically inside the daily-discovery workflow before discover
+# runs, so this workflow no longer needs to fire on every push. Keep it available as a
+# manual trigger for when you want to apply a new migration without waiting for the daily
+# run (e.g. right after merging a schema change on a branch that didn't go through CI).
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 concurrency:
   group: migrate
