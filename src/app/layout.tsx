@@ -64,6 +64,9 @@ export const metadata: Metadata = {
   // for citations — these tokens are honored by all major model providers.
   other: {
     'ai-content-declaration': 'allowed',
+    // Google Search Console verification — paste the value Google gives you here, or set
+    // NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION in Vercel env vars and it'll be picked up.
+    'google-site-verification': process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION ?? '',
   },
 };
 
