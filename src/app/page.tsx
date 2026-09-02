@@ -3,6 +3,8 @@ import { buildApplicationWhere, buildOrderBy, type SearchParams } from '@/lib/qu
 import { AppCard } from '@/components/AppCard';
 import { FilterBar } from '@/components/FilterBar';
 import { SearchBar } from '@/components/SearchBar';
+import { Hero } from '@/components/Hero';
+import { WebsiteStructuredData } from '@/components/StructuredData';
 
 export const revalidate = 300; // catalog data changes at most daily; 5 min cache is plenty
 
@@ -28,6 +30,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
 
     return (
       <div>
+        <WebsiteStructuredData />
         <SearchBar />
         <FilterBar />
         <p className="text-sm text-slate-500 mb-3">{apps.length} results</p>
@@ -71,6 +74,8 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
 
   return (
     <div>
+      <WebsiteStructuredData />
+      <Hero />
       <SearchBar />
       <FilterBar />
       <Section title="Trending this week" apps={trending} />

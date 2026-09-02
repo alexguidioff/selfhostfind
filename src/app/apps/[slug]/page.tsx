@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { Badge } from '@/components/Badge';
 import { AppCard } from '@/components/AppCard';
+import { AppStructuredData } from '@/components/StructuredData';
 import { timeAgo } from '@/lib/types';
 
 export const revalidate = 300;
@@ -37,11 +38,12 @@ export default async function AppDetailPage({ params }: { params: Promise<{ slug
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <AppStructuredData app={app} />
       <div className="lg:col-span-2">
         <div className="flex items-start gap-4">
           <div className="h-14 w-14 shrink-0 rounded bg-slate-100 dark:bg-slate-800 overflow-hidden flex items-center justify-center text-slate-400">
             {app.logoUrl ? (
-              <Image src={app.logoUrl} alt="" width={56} height={56} unoptimized className="object-cover h-full w-full" />
+              <Image src={app.logoUrl} alt={`${app.name} logo`} width={56} height={56} unoptimized className="object-cover h-full w-full" />
             ) : (
               app.name.slice(0, 2).toUpperCase()
             )}
@@ -86,8 +88,8 @@ export default async function AppDetailPage({ params }: { params: Promise<{ slug
 
         {app.screenshotUrls.length > 0 && (
           <div className="mt-6 grid grid-cols-2 gap-2">
-            {app.screenshotUrls.map((url) => (
-              <Image key={url} src={url} alt="" width={480} height={300} unoptimized className="rounded border border-slate-200 dark:border-slate-800 object-cover w-full h-40" />
+            {app.screenshotUrls.map((url, idx) => (
+              <Image key={url} src={url} alt={`${app.name} screenshot ${idx + 1}`} width={480} height={300} unoptimized className="rounded border border-slate-200 dark:border-slate-800 object-cover w-full h-40" />
             ))}
           </div>
         )}
@@ -206,7 +208,32 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const app = await prisma.application.findUnique({ where: { slug } });
+  const app = await prisma.application.findUnique({
+    where: { slug },
+    include: { repository: true },
+  });
   if (!app) return {};
-  return { title: `${app.name} — SelfHostFind`, description: app.shortDescription ?? undefined };
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://selfhostfind.vercel.app';
+  const description = app.shortDescription
+    ?? `${app.name} is a ${app.category ?? 'self-hosted'} app. Health ${Math.round(app.healthScore)}/100, ⭐ ${app.repository.stars.toLocaleString()} stars on GitHub.`;
+  return {
+    title: `${app.name} — ${app.category ?? 'self-hosted'}`,
+    description,
+    alternates: { canonical: `/apps/${app.slug}` },
+    openGraph: {
+      type: 'website',
+      url: `${siteUrl}/apps/${app.slug}`,
+      title: `${app.name} — SelfHostFind`,
+      description,
+      images: app.logoUrl
+        ? [{ url: app.logoUrl, alt: `${app.name} logo` }]
+        : [{ url: '/og-default.png', width: 1200, height: 630, alt: app.name }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: app.name,
+      description,
+      images: app.logoUrl ? [app.logoUrl] : ['/og-default.png'],
+    },
+  };
 }

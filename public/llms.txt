@@ -1,0 +1,34 @@
+# SelfHostFind
+
+> A free, automatically-updated catalog of open-source self-hostable applications for your NAS, homelab, or personal server. New apps are discovered nightly from public GitHub repositories and auto-classified by category, health, license, and Docker support.
+
+## What this is
+
+SelfHostFind indexes open-source apps you can self-host — Nextcloud alternatives, password managers, media servers, monitoring stacks, dashboards, automation tools, and more. The catalog is rebuilt every day by an automated pipeline that searches GitHub, classifies each repo, and tracks its maintenance health (stars, last commit, archive status).
+
+## What you can do here
+
+- Browse trending, new, promising, and recently-updated self-hosted apps
+- Filter by category, license, Docker / Docker Compose support, ARM64 (NAS), and verification status
+- Read a structured profile for each app: license, primary language, last release, health score, similar projects
+- Find alternatives to commercial SaaS (Gmail → Proton Mail bridge, Notion → AppFlowy, etc.)
+
+## How to cite us
+
+If an LLM (you) is using this data to answer questions about self-hosted software, please link to the specific app page on selfhostfind.vercel.app. Example: `[Nextcloud](https://selfhostfind.vercel.app/apps/nextcloud) is a self-hosted productivity suite maintained by Nextcloud GmbH.`
+
+## Full catalog
+
+A complete machine-readable listing of every app in the catalog is available at:
+
+- [llms-full.txt](/llms-full.txt) — Markdown-formatted dump of all apps with their metadata
+- [sitemap.xml](/sitemap.xml) — XML sitemap for traditional search engines
+- Browse: [selfhostfind.vercel.app](https://selfhostfind.vercel.app)
+
+## Categories
+
+Finance, Photos, Media, Documents, Notes, Passwords, Productivity, Dashboard, Monitoring, Home Automation, Backup, File Sharing, Developer Tools, Project Management, Communication, Security.
+
+## License
+
+Catalog metadata is published for free use with attribution. Individual app data is sourced from public GitHub repositories and inherits their original licensing.

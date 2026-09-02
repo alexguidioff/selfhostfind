@@ -15,7 +15,7 @@ export function AppCard({ app }: { app: AppWithRepo }) {
       <div className="flex items-start gap-3">
         <div className="h-10 w-10 shrink-0 rounded bg-slate-100 dark:bg-slate-800 overflow-hidden flex items-center justify-center text-slate-400 text-xs">
           {logo ? (
-            <Image src={logo} alt="" width={40} height={40} className="object-cover h-full w-full" unoptimized />
+            <Image src={logo} alt={`${app.name} logo`} width={40} height={40} className="object-cover h-full w-full" unoptimized />
           ) : (
             app.name.slice(0, 2).toUpperCase()
           )}
