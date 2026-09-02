@@ -54,6 +54,12 @@ export async function Hero() {
           >
             Browse new arrivals
           </Link>
+          <Link
+            href="/category"
+            className="inline-flex items-center rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-brand-500 px-5 py-2.5 text-sm font-medium transition-colors"
+          >
+            All categories
+          </Link>
         </div>
 
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">

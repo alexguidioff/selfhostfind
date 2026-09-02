@@ -79,7 +79,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <nav className="text-sm flex gap-4 text-slate-600 dark:text-slate-400" aria-label="Main">
               <Link href="/?sort=trending">Trending</Link>
               <Link href="/?sort=newest">New</Link>
-              <Link href="/category/media">Categories</Link>
+              <Link href="/category">Categories</Link>
               <Link href="/admin">Admin</Link>
             </nav>
           </div>

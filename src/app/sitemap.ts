@@ -28,13 +28,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   // Category landing pages — each one is a long-tail SEO target ("self-hosted media server",
   // "self-hosted password manager", etc.). Static list, so we can hardcode them.
+  const now = new Date();
+
   const categoryEntries: MetadataRoute.Sitemap = CATEGORIES.map((slug) => ({
     url: `${SITE_URL}/category/${slug.toLowerCase().replace(/\s+/g, '-')}`,
     changeFrequency: 'daily',
     priority: 0.7,
   }));
 
-  const now = new Date();
+  const categoryIndex: MetadataRoute.Sitemap[number] = {
+    url: `${SITE_URL}/category`,
+    lastModified: now,
+    changeFrequency: 'weekly',
+    priority: 0.6,
+  };
 
   return [
     {
@@ -61,6 +68,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: 'weekly',
       priority: 0.5,
     },
+    categoryIndex,
     ...categoryEntries,
     ...appEntries,
   ];
