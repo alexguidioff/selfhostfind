@@ -15,7 +15,7 @@ jobs:
         with:
           version: 9
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           # 22.9+ required: seed/discover/snapshot use node's --env-file-if-exists flag.
           node-version: 22
