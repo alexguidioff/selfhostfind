@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { Badge } from './Badge';
+import { CategoryIcon } from './CategoryIcon';
 import type { AppWithRepo } from '@/lib/types';
 import { timeAgo } from '@/lib/types';
 
@@ -21,9 +22,14 @@ export function AppCard({ app }: { app: AppWithRepo }) {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <h3 className="font-medium truncate">{app.name}</h3>
-            {app.category && <Badge>{app.category}</Badge>}
+            {app.category && (
+              <span className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400 shrink-0">
+                <CategoryIcon name={app.category} className="w-3.5 h-3.5" />
+                {app.category}
+              </span>
+            )}
           </div>
           <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2 mt-1">
             {app.shortDescription ?? 'No description available.'}

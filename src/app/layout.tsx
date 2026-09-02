@@ -80,6 +80,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/?sort=trending">Trending</Link>
               <Link href="/?sort=newest">New</Link>
               <Link href="/category">Categories</Link>
+              <Link href="/tag">Capabilities</Link>
               <Link href="/admin">Admin</Link>
             </nav>
           </div>

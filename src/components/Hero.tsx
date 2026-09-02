@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db';
 // Live counters in the hero. We count once at render time — no caching — so the numbers
 // are honest. With `revalidate = 300` on the homepage, the count can be up to 5 minutes stale.
 async function getCounters() {
-  const [appCount, categoryCount, dockerCount, armCount, verifiedCount] = await Promise.all([
+  const [appCount, categoryCount, dockerCount, armCount, composeCount, nasCount, verifiedCount] = await Promise.all([
     prisma.application.count({ where: { hidden: false } }),
     prisma.application.findMany({
       where: { hidden: false, category: { not: null } },
@@ -12,18 +12,31 @@ async function getCounters() {
       distinct: ['category'],
     }).then((rows) => rows.length),
     prisma.application.count({
-      where: { hidden: false, OR: [{ dockerSupported: true }, { composeSupported: true }] },
+      where: { hidden: false, dockerSupported: true, composeSupported: false },
     }),
     prisma.application.count({ where: { hidden: false, arm64Supported: true } }),
+    prisma.application.count({ where: { hidden: false, composeSupported: true } }),
+    prisma.application.count({ where: { hidden: false, isNasFriendly: true } }),
     prisma.application.count({
       where: { hidden: false, verificationStatus: { not: 'UNVERIFIED' } },
     }),
   ]);
-  return { appCount, categoryCount, dockerCount, armCount, verifiedCount };
+  return {
+    appCount,
+    categoryCount,
+    dockerCount,
+    armCount,
+    composeCount,
+    nasCount,
+    verifiedCount,
+  };
 }
 
 export async function Hero() {
-  const { appCount, categoryCount, dockerCount, armCount, verifiedCount } = await getCounters();
+  const {
+    appCount, categoryCount, dockerCount, armCount,
+    composeCount, nasCount, verifiedCount,
+  } = await getCounters();
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://selfhostfind.vercel.app';
 
   return (
@@ -62,6 +75,18 @@ export async function Hero() {
           </Link>
         </div>
 
+        <div className="mb-8">
+          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2 font-medium">
+            Browse by capability
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Chip href="/tag/docker-compose" count={composeCount} dotClass="bg-sky-500">Docker Compose</Chip>
+            <Chip href="/tag/arm64" count={armCount} dotClass="bg-emerald-500">ARM64 / NAS</Chip>
+            <Chip href="/tag/nas-friendly" count={nasCount} dotClass="bg-amber-500">NAS-friendly</Chip>
+            <Chip href="/tag/docker" count={dockerCount} dotClass="bg-indigo-500">Docker</Chip>
+          </div>
+        </div>
+
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
           <Stat label="apps indexed" value={appCount.toLocaleString()} />
           <Stat label="categories" value={categoryCount.toString()} />
@@ -83,5 +108,20 @@ function Stat({ label, value }: { label: string; value: string }) {
       <dt className="text-xs text-slate-500 dark:text-slate-400">{label}</dt>
       <dd className="text-lg font-semibold text-slate-900 dark:text-slate-100">{value}</dd>
     </div>
+  );
+}
+
+function Chip({
+  href, count, dotClass, children,
+}: { href: string; count: number; dotClass: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 hover:border-brand-500 hover:bg-white dark:hover:bg-slate-800 px-3 py-1.5 text-sm font-medium transition-colors"
+    >
+      <span className={`w-2 h-2 rounded-full ${dotClass}`} aria-hidden="true" />
+      {children}
+      <span className="text-xs text-slate-500">{count.toLocaleString()}</span>
+    </Link>
   );
 }

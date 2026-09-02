@@ -36,6 +36,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.7,
   }));
 
+  // Capability tags — same SEO treatment as category pages, scoped to popular long-tail
+  // queries like "self-hosted docker compose apps" and "arm64 self-hosted".
+  const tagSlugs = ['docker-compose', 'docker', 'arm64', 'nas-friendly'];
+  const tagEntries: MetadataRoute.Sitemap = tagSlugs.map((slug) => ({
+    url: `${SITE_URL}/tag/${slug}`,
+    changeFrequency: 'daily',
+    priority: 0.7,
+  }));
+
   const categoryIndex: MetadataRoute.Sitemap[number] = {
     url: `${SITE_URL}/category`,
     lastModified: now,
@@ -70,6 +79,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
     categoryIndex,
     ...categoryEntries,
+    {
+      url: `${SITE_URL}/tag`,
+      lastModified: now,
+      changeFrequency: 'weekly',
+      priority: 0.6,
+    },
+    ...tagEntries,
     ...appEntries,
   ];
 }
