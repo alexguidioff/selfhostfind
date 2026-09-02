@@ -1,0 +1,173 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  AUTO_VERIFIED
+  MANUALLY_VERIFIED
+}
+
+enum ScanStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+// One row per GitHub (or future: Codeberg/GitLab) repository discovered by the pipeline.
+// Raw, mostly-objective metadata lives here. Interpreted/curated data lives on Application.
+model Repository {
+  id             String   @id @default(cuid())
+  source         String   @default("github") // github | codeberg | gitlab (future)
+  githubId       BigInt   @unique
+  owner          String
+  name           String
+  fullName       String   @unique
+  description    String?
+  repositoryUrl  String
+  homepageUrl    String?
+  stars          Int      @default(0)
+  forks          Int      @default(0)
+  watchers       Int      @default(0)
+  openIssues     Int      @default(0)
+  license        String?
+  primaryLanguage String?
+  languages      Json?    // { "TypeScript": 12345, "Go": 456, ... } byte counts
+  topics         String[] @default([])
+  readmeExcerpt  String?  // first N chars, used for classification + display
+  createdAt      DateTime
+  pushedAt       DateTime
+  latestReleaseAt DateTime?
+  latestReleaseTag String?
+  archived       Boolean  @default(false)
+  fork           Boolean  @default(false)
+  defaultBranch  String   @default("main")
+
+  // A repo that gets deleted or renamed never reappears in discovery search results (its
+  // old full_name 404s, and discovery only *finds* repos, it doesn't re-check known ones).
+  // The `reconcile` job looks each repo up by its immutable githubId (which follows
+  // renames), so this catalog doesn't accumulate dead links forever.
+  unreachable    Boolean  @default(false)
+  lastVerifiedAt DateTime?
+
+  discoveredAt   DateTime @default(now())
+  lastScannedAt  DateTime?
+  discoverySource String[] @default([]) // which search queries surfaced this repo (provenance)
+
+  application    Application?
+  snapshots      MetricSnapshot[]
+  scans          Scan[]
+
+  createdAtRow   DateTime @default(now())
+  updatedAtRow   DateTime @updatedAt
+
+  @@index([stars])
+  @@index([pushedAt])
+  @@index([archived, fork])
+  @@index([unreachable])
+}
+
+// The curated/derived "product" view of a Repository: classification, install metadata,
+// scores. Kept separate from Repository so raw GitHub sync never clobbers curation state.
+model Application {
+  id             String   @id @default(cuid())
+  repositoryId   String   @unique
+  repository     Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  slug           String   @unique
+  name           String
+  shortDescription String?
+
+  category       String?
+  subcategory    String?
+  alternativesTo String[] @default([])
+
+  isSelfHosted   Boolean  @default(false)
+  isNasFriendly  Boolean  @default(false)
+  dockerSupported   Boolean @default(false)
+  composeSupported  Boolean @default(false)
+  arm64Supported    Boolean? // null = unknown
+  amd64Supported    Boolean? // null = unknown
+
+  databases      String[] @default([]) // e.g. ["PostgreSQL", "SQLite"]
+  installMethods String[] @default([]) // e.g. ["Docker Compose", "Docker", "Manual"]
+  envVars        String[] @default([])
+  ports          Int[]    @default([])
+  containerImage String?  // e.g. ghcr.io/org/app
+
+  documentationUrl String?
+  demoUrl          String?
+  logoUrl          String?
+  screenshotUrls   String[] @default([])
+
+  // Provenance & trust
+  classificationConfidence Float  @default(0) // 0..1
+  classificationSource     String @default("keyword-rules") // keyword-rules | llm | manual
+  fieldSources     Json?    // per-field provenance, e.g. { "category": "keyword-rules", "databases": "readme-scan" }
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+
+  // Scoring (0..100 each, healthScore is the weighted composite)
+  healthScore         Float @default(0)
+  activityScore        Float @default(0)
+  documentationScore   Float @default(0)
+  installEaseScore     Float @default(0)
+  nasCompatibilityScore Float @default(0)
+  dockerScore           Float @default(0)
+  popularityScore       Float @default(0)
+  growthScore            Float @default(0)
+  classificationTrustScore Float @default(0)
+
+  // Curation / moderation
+  approved      Boolean  @default(false)
+  hidden        Boolean  @default(false)
+  manualOverrides Json?  // set of field names a human has edited; pipeline must not overwrite these
+  adminNotes    String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([category])
+  @@index([healthScore])
+  @@index([approved, hidden])
+}
+
+// Periodic snapshot of a repository's public metrics, used to compute trending deltas
+// (new stars in 24h/7d/30d, growth %) without needing full history from GitHub.
+model MetricSnapshot {
+  id           String   @id @default(cuid())
+  repositoryId String
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  stars        Int
+  forks        Int
+  openIssues   Int      @default(0)
+  recordedAt   DateTime @default(now())
+
+  @@index([repositoryId, recordedAt])
+}
+
+// One row per pipeline run against a single repository. Gives us an audit trail of
+// why a repo was included/excluded, and lets re-runs stay idempotent (upsert by githubId).
+model Scan {
+  id           String   @id @default(cuid())
+  repositoryId String?
+  repository   Repository? @relation(fields: [repositoryId], references: [id], onDelete: SetNull)
+  githubFullName String  // kept even if repository row doesn't exist yet (e.g. rejected candidates)
+  status       ScanStatus @default(PENDING)
+  stage        String?  // discovery | prefilter | analyze | classify | score | persist
+  included     Boolean? // final funnel decision
+  reason       String?  // human-readable reason for inclusion/exclusion
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  error        String?
+  extractedData Json?   // raw extracted signals for debugging (dockerfile found, readme flags, etc.)
+
+  @@index([githubFullName])
+  @@index([status])
+}

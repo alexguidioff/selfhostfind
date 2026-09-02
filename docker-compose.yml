@@ -1,0 +1,142 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-selfhostfind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-selfhostfind}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-selfhostfind}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Applies pending Prisma migrations, then exits. Uses the `worker` target because it has
+  # the full `prisma` CLI + devDependencies — the pruned `runner` image `web` runs deliberately
+  # doesn't ship those (Next's standalone output only bundles what the running app needs).
+  migrate:
+    build:
+      context: .
+      target: worker
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-selfhostfind}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-selfhostfind}
+    command: ["pnpm", "prisma", "migrate", "deploy"]
+
+  web:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-selfhostfind}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-selfhostfind}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET}
+      CRON_SECRET: ${CRON_SECRET}
+      # Only needed if you trigger discovery via POST /api/cron/discover instead of (or in
+      # addition to) the `discover`/`snapshot` one-shot services below.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      DISCOVERY_MAX_PAGES_PER_QUERY: ${DISCOVERY_MAX_PAGES_PER_QUERY:-2}
+      DISCOVERY_CONCURRENCY: ${DISCOVERY_CONCURRENCY:-3}
+      AUTO_VERIFY_CONFIDENCE_THRESHOLD: ${AUTO_VERIFY_CONFIDENCE_THRESHOLD:-0.75}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_FORMAT: ${ALERT_WEBHOOK_FORMAT:-generic}
+      HEARTBEAT_URL: ${HEARTBEAT_URL:-}
+      NODE_ENV: production
+    ports:
+      - "${PORT:-3000}:3000"
+
+  # Runs the discovery pipeline once, then exits. Schedule it with host crontab or GitHub
+  # Actions (see README); run manually with: docker compose run --rm discover
+  discover:
+    build:
+      context: .
+      target: worker
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-selfhostfind}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-selfhostfind}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      DISCOVERY_MAX_PAGES_PER_QUERY: ${DISCOVERY_MAX_PAGES_PER_QUERY:-2}
+      DISCOVERY_CONCURRENCY: ${DISCOVERY_CONCURRENCY:-3}
+      AUTO_VERIFY_CONFIDENCE_THRESHOLD: ${AUTO_VERIFY_CONFIDENCE_THRESHOLD:-0.75}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_FORMAT: ${ALERT_WEBHOOK_FORMAT:-generic}
+      HEARTBEAT_URL: ${HEARTBEAT_URL:-}
+      NODE_ENV: production
+    command: ["pnpm", "discover"]
+    profiles: ["jobs"]
+
+  snapshot:
+    build:
+      context: .
+      target: worker
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-selfhostfind}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-selfhostfind}
+      AUTO_VERIFY_CONFIDENCE_THRESHOLD: ${AUTO_VERIFY_CONFIDENCE_THRESHOLD:-0.75}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_FORMAT: ${ALERT_WEBHOOK_FORMAT:-generic}
+      HEARTBEAT_URL: ${HEARTBEAT_URL:-}
+      NODE_ENV: production
+    command: ["pnpm", "snapshot"]
+    profiles: ["jobs"]
+
+  # Looks every catalog repo up by its immutable GitHub ID to catch renames/archival/deletion
+  # that discovery search can never see on its own (see pipeline/reconcile.ts). Run this
+  # before `snapshot` so verification-status re-evaluation sees fresh archived/pushedAt data.
+  reconcile:
+    build:
+      context: .
+      target: worker
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-selfhostfind}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-selfhostfind}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      RECONCILE_CONCURRENCY: ${RECONCILE_CONCURRENCY:-5}
+      SCAN_RETENTION_DAYS: ${SCAN_RETENTION_DAYS:-90}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_FORMAT: ${ALERT_WEBHOOK_FORMAT:-generic}
+      HEARTBEAT_URL: ${HEARTBEAT_URL:-}
+      NODE_ENV: production
+    command: ["pnpm", "reconcile"]
+    profiles: ["jobs"]
+
+  # Dumps the DB, restores it into a throwaway database to prove the dump actually works,
+  # then prunes old backups. Uses the same postgres image as `db` so pg_dump/psql are always
+  # version-matched to the server. Run manually with: docker compose run --rm backup
+  backup:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-selfhostfind}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-selfhostfind}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_FORMAT: ${ALERT_WEBHOOK_FORMAT:-generic}
+      BACKUP_HEARTBEAT_URL: ${BACKUP_HEARTBEAT_URL:-}
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - db-backups:/backups
+    entrypoint: ["sh", "/backup.sh"]
+    profiles: ["jobs"]
+
+volumes:
+  db-data:
+  db-backups:

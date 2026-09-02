@@ -1,0 +1,59 @@
+name: Daily discovery
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch: {}
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22.9+ required: seed/discover/snapshot use node's --env-file-if-exists flag.
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm prisma generate
+
+      - name: Apply Prisma migrations (idempotent)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm prisma migrate deploy
+
+      - name: Run discovery pipeline
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GITHUB_TOKEN: ${{ secrets.GH_DISCOVERY_TOKEN }}
+          AUTO_VERIFY_CONFIDENCE_THRESHOLD: ${{ vars.AUTO_VERIFY_CONFIDENCE_THRESHOLD }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: pnpm discover
+
+      - name: Reconcile catalog against GitHub (renames/archival/deletion)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GITHUB_TOKEN: ${{ secrets.GH_DISCOVERY_TOKEN }}
+          RECONCILE_CONCURRENCY: ${{ vars.RECONCILE_CONCURRENCY }}
+          SCAN_RETENTION_DAYS: ${{ vars.SCAN_RETENTION_DAYS }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: pnpm reconcile
+
+      - name: Record metric snapshots
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: pnpm snapshot

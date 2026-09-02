@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: selfhostfind
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: selfhostfind
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U selfhostfind"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://selfhostfind:ci_password@localhost:5432/selfhostfind
+      ADMIN_PASSWORD: ci_admin_password
+      ADMIN_SESSION_SECRET: ci_session_secret_at_least_32_chars_long
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm prisma migrate deploy
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  # This job is the one branch protection should require — it never runs unless every job
+  # above it succeeded, so requiring only this single check is enough to block a merge on
+  # any real failure (typecheck, tests, build, or migration).
+  ci-passed:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CI passed"

@@ -1,0 +1,42 @@
+name: Dependabot auto-merge
+
+# Keeps the "no human touches this to keep it alive" promise for the safe case: a patch or
+# minor dependency bump that passes the full CI suite (typecheck, tests, build against a
+# real Postgres) merges itself. A major bump — the kind that actually breaks things — is
+# left open for a human to look at; auto-merging semver-major on faith is how an unattended
+# project trades a slow security-rot problem for a fast breakage problem.
+#
+# Requires a one-time repo setting (see README "Keeping dependencies current"): branch
+# protection on `main` requiring the `ci-passed` check, and "Allow auto-merge" enabled.
+# Without that, `gh pr merge --auto` still queues the merge but nothing blocks it on CI.
+on:
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Enable auto-merge for patch/minor updates
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Leave a note on major updates
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        run: gh pr comment "$PR_URL" --body "Major version bump — left for manual review rather than auto-merged."
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

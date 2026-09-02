@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # App dependencies (Next.js, Prisma, etc.) — see dependabot-auto-merge.yml for how patch/
+  # minor bumps merge themselves once CI passes, while majors wait for manual review.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      patch-and-minor:
+        update-types: [patch, minor]
+    open-pull-requests-limit: 15
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
