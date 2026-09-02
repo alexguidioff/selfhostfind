@@ -27,7 +27,7 @@ jobs:
       ADMIN_PASSWORD: ci_admin_password
       ADMIN_SESSION_SECRET: ci_session_secret_at_least_32_chars_long
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:
