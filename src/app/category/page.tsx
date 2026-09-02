@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { CATEGORIES } from '@/lib/constants';
+import { CategoryIcon } from '@/components/CategoryIcon';
 
 export const revalidate = 300;
 
@@ -52,14 +53,18 @@ export default async function CategoryIndex() {
           <li key={c.slug}>
             <Link
               href={`/category/${c.slug}`}
-              className="block rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-brand-500 px-4 py-3 transition-colors"
+              className="group flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-brand-500 hover:bg-slate-50 dark:hover:bg-slate-800/50 px-4 py-3 transition-colors"
             >
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{c.name}</span>
-                <span className="text-sm text-slate-500">
+              <span className="shrink-0 w-9 h-9 rounded-md bg-brand-50 dark:bg-brand-950/40 text-brand-600 dark:text-brand-400 flex items-center justify-center group-hover:bg-brand-100 dark:group-hover:bg-brand-900/60 transition-colors">
+                <CategoryIcon name={c.name} className="w-5 h-5" />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block font-medium truncate">{c.name}</span>
+                <span className="block text-xs text-slate-500">
                   {c.count.toLocaleString()} {c.count === 1 ? 'app' : 'apps'}
                 </span>
-              </div>
+              </span>
+              <span aria-hidden="true" className="text-slate-400 group-hover:text-brand-500 transition-colors">→</span>
             </Link>
           </li>
         ))}

@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/db';
 import { CATEGORIES } from '@/lib/constants';
 import { AppCard } from '@/components/AppCard';
+import { CategoryIcon } from '@/components/CategoryIcon';
 
 export const revalidate = 300;
 
@@ -52,15 +53,20 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
 
   return (
     <div>
-      <header className="mb-6">
-        <p className="text-sm text-brand-600 dark:text-brand-400 font-medium mb-1">Category</p>
-        <h1 className="text-3xl font-bold tracking-tight mb-2">
-          Self-hosted {name} apps
-        </h1>
-        <p className="text-slate-600 dark:text-slate-400 max-w-2xl">
-          {apps.length} {apps.length === 1 ? 'project' : 'projects'} found in the{' '}
-          <strong>{name}</strong> category. Sorted by health score.
-        </p>
+      <header className="mb-6 flex items-start gap-4">
+        <span className="shrink-0 w-12 h-12 rounded-lg bg-brand-50 dark:bg-brand-950/40 text-brand-600 dark:text-brand-400 flex items-center justify-center">
+          <CategoryIcon name={name} className="w-6 h-6" />
+        </span>
+        <div>
+          <p className="text-sm text-brand-600 dark:text-brand-400 font-medium mb-1">Category</p>
+          <h1 className="text-3xl font-bold tracking-tight mb-2">
+            Self-hosted {name} apps
+          </h1>
+          <p className="text-slate-600 dark:text-slate-400 max-w-2xl">
+            {apps.length} {apps.length === 1 ? 'project' : 'projects'} found in the{' '}
+            <strong>{name}</strong> category. Sorted by health score.
+          </p>
+        </div>
       </header>
 
       {apps.length === 0 ? (
