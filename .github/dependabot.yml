@@ -10,6 +10,29 @@ updates:
       patch-and-minor:
         update-types: [patch, minor]
     open-pull-requests-limit: 15
+    # Major bumps for these packages need manual review (codegen changes, API breaks,
+    # React 19 migration, Next 15 app-router changes). Dependabot is left to suggest them
+    # — we just don't let it touch them in the same PR as other unrelated updates.
+    ignore:
+      - dependency-name: "@prisma/client"
+        update-types: [version-update:semver-major]
+      - dependency-name: "prisma"
+        update-types: [version-update:semver-major]
+      - dependency-name: "next"
+        update-types: [version-update:semver-major]
+      - dependency-name: "react"
+        update-types: [version-update:semver-major]
+      - dependency-name: "react-dom"
+        update-types: [version-update:semver-major]
+      # Keep the two Prisma packages in lockstep so we never end up with client 7.x + cli 5.x.
+      - dependency-name: "@prisma/client"
+        versions:
+          - ">=6.a, <7.0.0"
+          - ">=7.a"
+      - dependency-name: "prisma"
+        versions:
+          - ">=6.a, <7.0.0"
+          - ">=7.a"
 
   - package-ecosystem: docker
     directory: /

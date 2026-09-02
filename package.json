@@ -23,7 +23,7 @@
     "snapshot": "tsx --env-file-if-exists=.env src/pipeline/snapshot.ts"
   },
   "dependencies": {
-    "@prisma/client": "^5.20.0",
+    "@prisma/client": "5.22.0",
     "next": "^14.2.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -39,7 +39,7 @@
     "eslint": "^8.57.0",
     "eslint-config-next": "^14.2.5",
     "postcss": "^8.4.39",
-    "prisma": "^5.20.0",
+    "prisma": "5.22.0",
     "tailwindcss": "^3.4.4",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3",
