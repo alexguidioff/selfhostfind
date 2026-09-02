@@ -1,3 +1,11 @@
+# Works as both pnpm 9 and pnpm 10+:
+# - pnpm 9 requires the `packages` key (treats the project as a single-package workspace).
+# - pnpm 10+ still reads `packages`; the new `allowBuilds` keys are only consumed by 10+.
+# We need pnpm 9 compatibility because the GitHub Actions workflow pins pnpm 9.
+packages:
+  - '.'
+
+# pnpm 10+ only — ignored by pnpm 9. Replaces the deprecated `onlyBuiltDependencies` field.
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
