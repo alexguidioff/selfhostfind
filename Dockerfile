@@ -1,6 +1,6 @@
 # Multi-stage build so the runtime image (what actually runs on the NAS/homelab) stays small.
 # Node 22.9+ required: the worker target's scripts use node's --env-file-if-exists flag.
-FROM node:22-alpine AS base
+FROM node:26-alpine AS base
 # Prisma's query/migration engines need OpenSSL to be present on Alpine — without it they
 # fail at runtime with an opaque "Could not parse schema engine response" error rather than
 # a clear "openssl not found" message.
