@@ -1,3 +1,4 @@
+import { buildApplicationWhere } from '@/lib/query';
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
 
@@ -11,10 +12,10 @@ export const metadata = {
 };
 
 const TAGS: { slug: string; label: string; description: string; where: Record<string, unknown> }[] = [
-  { slug: 'docker-compose', label: 'Docker Compose', description: 'Ship a compose file — one-command install.', where: { composeSupported: true } },
-  { slug: 'docker', label: 'Docker', description: 'Official Docker image, no Compose required.', where: { dockerSupported: true, composeSupported: false } },
-  { slug: 'arm64', label: 'ARM64', description: 'Works on Apple Silicon, Raspberry Pi, NAS devices.', where: { arm64Supported: true } },
-  { slug: 'nas-friendly', label: 'NAS-friendly', description: 'Lightweight, low RAM, easy to back up.', where: { isNasFriendly: true } },
+  { slug: 'docker-compose', label: 'Docker Compose', description: 'A Compose file was detected.', where: { composeSupported: true } },
+  { slug: 'docker', label: 'Docker', description: 'A Dockerfile was detected, without Compose.', where: { dockerSupported: true, composeSupported: false } },
+  { slug: 'arm64', label: 'ARM64', description: 'ARM64 mentioned in the README; not installation-tested.', where: { arm64Supported: true } },
+  { slug: 'nas-friendly', label: 'NAS-friendly', description: 'NAS-related mentions; check hardware requirements.', where: { isNasFriendly: true } },
 ];
 
 export default async function TagIndex() {
@@ -22,7 +23,7 @@ export default async function TagIndex() {
     TAGS.map(async (t) => ({
       ...t,
       count: await prisma.application.count({
-        where: { hidden: false, repository: { unreachable: false }, ...t.where },
+        where: { ...buildApplicationWhere({}), repository: { unreachable: false }, ...t.where },
       }),
     })),
   );

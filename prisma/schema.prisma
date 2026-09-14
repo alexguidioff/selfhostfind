@@ -93,6 +93,7 @@ model Application {
   isNasFriendly  Boolean  @default(false)
   dockerSupported   Boolean @default(false)
   composeSupported  Boolean @default(false)
+  composePath       String?
   arm64Supported    Boolean? // null = unknown
   amd64Supported    Boolean? // null = unknown
 

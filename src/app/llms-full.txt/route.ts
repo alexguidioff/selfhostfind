@@ -1,3 +1,4 @@
+import { buildApplicationWhere } from '@/lib/query';
 import { prisma } from '@/lib/db';
 
 // Machine-readable dump of every cataloged app, in Markdown. Designed to be fetched by LLM
@@ -12,7 +13,7 @@ export const runtime = 'nodejs';
 
 export async function GET() {
   const apps = await prisma.application.findMany({
-    where: { hidden: false },
+    where: { ...buildApplicationWhere({}) },
     include: { repository: true },
     orderBy: [{ healthScore: 'desc' }, { name: 'asc' }],
   });
@@ -47,7 +48,8 @@ export async function GET() {
     if (app.dockerSupported) {
       lines.push(`- **Docker support**: ${app.composeSupported ? 'Docker Compose' : 'Docker only'}`);
     }
-    if (app.arm64Supported) lines.push(`- **Architecture**: amd64, arm64`);
+    lines.push(`- **Architectures reported (not tested)**: ${[app.amd64Supported && 'amd64', app.arm64Supported && 'arm64'].filter(Boolean).join(', ') || 'Unknown'}`);
+    lines.push(`- **Last analyzed**: ${app.repository.lastScannedAt?.toISOString().slice(0, 10) ?? 'Unknown'}`);
     lines.push(`- **Stars**: ${app.repository.stars.toLocaleString()}`);
     lines.push(`- **Last commit**: ${app.repository.pushedAt.toISOString().slice(0, 10)}`);
     if (app.repository.latestReleaseTag) {
@@ -57,8 +59,8 @@ export async function GET() {
     if (app.alternativesTo.length > 0) {
       lines.push(`- **Alternative to**: ${app.alternativesTo.join(', ')}`);
     }
-    if (app.isNasFriendly) lines.push('- **NAS-friendly**: yes');
-    if (app.databases.length > 0) lines.push(`- **Databases**: ${app.databases.join(', ')}`);
+    if (app.isNasFriendly) lines.push('- **NAS signals**: found; compatibility not tested');
+    if (app.databases.length > 0) lines.push(`- **Databases mentioned**: ${app.databases.join(', ')}`);
     if (app.ports.length > 0) lines.push(`- **Default ports**: ${app.ports.join(', ')}`);
     lines.push(`- **Profile**: ${siteUrl}/apps/${app.slug}`);
     lines.push(`- **Repository**: ${app.repository.repositoryUrl}`);

@@ -213,6 +213,13 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
       isNasFriendly: classification.nasFriendly,
       dockerSupported,
       composeSupported: analysis.composePresent,
+      composePath: analysis.composePath,
+      fieldSources: {
+        ...((existingApp?.fieldSources as Record<string, string> | null) ?? {}),
+        dockerSupported: 'repository-files', composeSupported: 'repository-files',
+        arm64Supported: 'readme-mention', amd64Supported: 'readme-mention',
+        databases: 'readme-mention', ports: 'readme-scan', isNasFriendly: 'keyword-rules',
+      },
       arm64Supported: analysis.arm64Supported,
       amd64Supported: analysis.amd64Supported,
       databases: analysis.databases,
@@ -231,7 +238,10 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
 
     // Never overwrite fields a human has manually corrected.
     for (const key of Object.keys(overrides)) {
-      if (overrides[key]) delete proposed[key];
+      if (overrides[key]) {
+        delete proposed[key];
+        (proposed.fieldSources as Record<string, string>)[key] = 'manual';
+      }
     }
 
     await prisma.application.upsert({

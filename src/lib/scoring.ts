@@ -93,13 +93,13 @@ export function computeScores(input: ScoringInput): ScoringOutput {
   else if (input.license && COPYLEFT_LICENSES.has(input.license)) licenseRaw = 0.8;
   else if (input.license) licenseRaw = 0.5;
 
-  // NAS compatibility: Compose install, explicit ARM64 support, and lightweight/no
-  // external DB requirement (SQLite-only or no DB) all make self-hosting on a NAS easier.
+  // NAS compatibility: Compose install, explicit ARM64 support, and lightweight
+  // DB signal (SQLite-only; an empty list means unknown) all make self-hosting on a NAS easier.
   let nasRaw = 0;
   if (input.composePresent) nasRaw += 0.4;
   if (input.arm64Supported === true) nasRaw += 0.3;
   else if (input.arm64Supported === null) nasRaw += 0.1; // unknown, not penalized as hard as "no"
-  if (input.databases.length === 0 || (input.databases.length === 1 && input.databases[0] === 'SQLite')) {
+  if (input.databases.length === 1 && input.databases[0] === 'SQLite') {
     nasRaw += 0.2;
   }
   if (input.nasFriendly) nasRaw += 0.1;

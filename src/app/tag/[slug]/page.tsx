@@ -1,8 +1,10 @@
 import { notFound } from 'next/navigation';
-import { prisma } from '@/lib/db';
+import { getCatalogPage } from '@/lib/catalog';
+import { Pagination } from '@/components/Pagination';
+import type { SearchParams } from '@/lib/query';
 import { AppCard } from '@/components/AppCard';
 
-export const revalidate = 300;
+export const dynamic = 'force-dynamic';
 
 // Capability "tags" — each one corresponds to a boolean column on the Application model.
 // These are the most useful long-tail filter dimensions for SEO and discovery (people search
@@ -21,7 +23,7 @@ const TAGS: Tag[] = [
     slug: 'docker-compose',
     label: 'Docker Compose',
     description:
-      'Self-hosted apps that ship a docker-compose.yml. One-command install on any Docker host.',
+      'Self-hosted apps with a detected Compose file. Check the project’s installation instructions.',
     icon: 'compose',
     where: { composeSupported: true },
   },
@@ -29,7 +31,7 @@ const TAGS: Tag[] = [
     slug: 'docker',
     label: 'Docker',
     description:
-      'Apps that ship a Dockerfile or official Docker image, even without a Compose file.',
+      'Apps with a detected Dockerfile and no detected Compose file.',
     icon: 'docker',
     where: { dockerSupported: true, composeSupported: false },
   },
@@ -37,7 +39,7 @@ const TAGS: Tag[] = [
     slug: 'arm64',
     label: 'ARM64',
     description:
-      'Apps with official ARM64 images — works out of the box on Apple Silicon, Raspberry Pi, and most NAS devices.',
+      'Apps with ARM64 mentions in their README. Image compatibility and installation have not been tested.',
     icon: 'arm',
     where: { arm64Supported: true },
   },
@@ -45,7 +47,7 @@ const TAGS: Tag[] = [
     slug: 'nas-friendly',
     label: 'NAS-friendly',
     description:
-      'Lightweight apps curated for NAS deployments: low RAM, ARM64-compatible, and easy to back up.',
+      'Apps with NAS-related signals in their README or topics. Resource requirements and compatibility have not been tested.',
     icon: 'nas',
     where: { isNasFriendly: true },
   },
@@ -72,21 +74,13 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   };
 }
 
-export default async function TagPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function TagPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<SearchParams> }) {
   const { slug } = await params;
   const tag = findTag(slug);
   if (!tag) notFound();
 
-  const apps = await prisma.application.findMany({
-    where: {
-      hidden: false,
-      repository: { unreachable: false },
-      ...tag.where,
-    },
-    include: { repository: true },
-    orderBy: { healthScore: 'desc' },
-    take: 60,
-  });
+  const query = await searchParams;
+  const { apps, total, page, pages } = await getCatalogPage(query, tag.where);
 
   return (
     <div>
@@ -95,7 +89,7 @@ export default async function TagPage({ params }: { params: Promise<{ slug: stri
         <h1 className="text-3xl font-bold tracking-tight mb-2">{tag.label} self-hosted apps</h1>
         <p className="text-slate-600 dark:text-slate-400 max-w-2xl">{tag.description}</p>
         <p className="text-sm text-slate-500 mt-2">
-          {apps.length} {apps.length === 1 ? 'app' : 'apps'} found.
+          {total} {total === 1 ? 'app' : 'apps'} found.
         </p>
       </header>
 
@@ -110,6 +104,8 @@ export default async function TagPage({ params }: { params: Promise<{ slug: stri
           ))}
         </div>
       )}
+
+      <Pagination page={page} pages={pages} params={query} pathname={`/tag/${slug}`} />
 
       <div className="text-sm text-slate-500 mt-8 flex gap-4">
         <a href="/" className="underline">← Home</a>

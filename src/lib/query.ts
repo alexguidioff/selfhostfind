@@ -2,15 +2,32 @@ import type { Prisma } from '@prisma/client';
 
 export type SearchParams = { [key: string]: string | string[] | undefined };
 
-function str(params: SearchParams, key: string): string | undefined {
+export function str(params: SearchParams, key: string): string | undefined {
   const v = params[key];
   return Array.isArray(v) ? v[0] : v;
 }
 
+export function normalizeSearch(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ')
+    .replace(/^alternatives? to\s+/, '')
+    .replace(/^self[- ]?hosted\s+/, '').trim().slice(0, 200);
+}
+
+export const PAGE_SIZE = 60;
+
+export function pageNumber(params: SearchParams): number {
+  const page = Number(str(params, 'page'));
+  return Number.isSafeInteger(page) && page > 0 && page <= 1_000_000 ? page : 1;
+}
+
+export function hasActiveFilters(params: SearchParams): boolean {
+  return ['q', 'sort', 'page', 'category', 'docker', 'compose', 'arm64', 'nas', 'verified', 'database', 'minStars', 'updated']
+    .some((key) => Boolean(str(params, key)));
+}
+
 // Builds the Prisma filter for the catalog grid from URL search params. Free-text search
-// (?q=) matches name/description/category/alternativesTo so phrases like "alternative to
-// splitwise" or "self-hosted notes" work without a separate full-text search engine for v1.
-export function buildApplicationWhere(params: SearchParams): Prisma.ApplicationWhereInput {
+// (?q=) matches normalized words and case-insensitive alternative IDs from getCatalogPage.
+export function buildApplicationWhere(params: SearchParams, alternativeIds: string[] = []): Prisma.ApplicationWhereInput {
   const where: Prisma.ApplicationWhereInput = {
     hidden: false,
     isSelfHosted: true,
@@ -19,15 +36,17 @@ export function buildApplicationWhere(params: SearchParams): Prisma.ApplicationW
     repository: { unreachable: false },
   };
 
-  const q = str(params, 'q');
+  const q = normalizeSearch(str(params, 'q') ?? '');
   if (q) {
+    // All meaningful words must match, but may occur in different fields.
     where.OR = [
-      { name: { contains: q, mode: 'insensitive' } },
-      { shortDescription: { contains: q, mode: 'insensitive' } },
-      { category: { contains: q, mode: 'insensitive' } },
-      { subcategory: { contains: q, mode: 'insensitive' } },
-      { alternativesTo: { has: q } },
-      { alternativesTo: { hasSome: q.split(/\s+/) } },
+      { id: { in: alternativeIds } },
+      { AND: q.split(' ').map((word) => ({ OR: [
+        { name: { contains: word, mode: 'insensitive' as const } },
+        { shortDescription: { contains: word, mode: 'insensitive' as const } },
+        { category: { contains: word, mode: 'insensitive' as const } },
+        { subcategory: { contains: word, mode: 'insensitive' as const } },
+      ] })) },
     ];
   }
 
@@ -45,12 +64,12 @@ export function buildApplicationWhere(params: SearchParams): Prisma.ApplicationW
   else if (database) where.databases = { has: database };
 
   const minStars = str(params, 'minStars');
-  if (minStars && !Number.isNaN(Number(minStars))) {
+  if (minStars && Number.isSafeInteger(Number(minStars)) && Number(minStars) >= 0 && Number(minStars) <= 2147483647) {
     where.repository = { ...(where.repository as object), stars: { gte: Number(minStars) } };
   }
 
   const updated = str(params, 'updated');
-  if (updated && !Number.isNaN(Number(updated))) {
+  if (updated && Number.isSafeInteger(Number(updated)) && Number(updated) > 0 && Number(updated) <= 36500) {
     const since = new Date(Date.now() - Number(updated) * 24 * 60 * 60 * 1000);
     where.repository = { ...(where.repository as object), pushedAt: { gte: since } };
   }

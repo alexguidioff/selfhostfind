@@ -3,6 +3,7 @@ import { getRootContents, getReadme, getLatestRelease, getLanguages } from '@/li
 export interface AnalysisResult {
   dockerfilePresent: boolean;
   composePresent: boolean;
+  composePath: string | null;
   readmeExcerpt: string | null;
   readmeFull: string | null;
   screenshotUrls: string[];
@@ -102,9 +103,19 @@ export async function analyzeRepository(
     getLanguages(owner, repo),
   ]);
 
-  const filenames = (contents ?? []).filter((f) => f.type === 'file').map((f) => f.name.toLowerCase());
-  const dockerfilePresent = filenames.some((f) => DOCKERFILE_FILENAMES.has(f) || f === 'dockerfile');
-  const composePresent = filenames.some((f) => COMPOSE_FILENAMES.has(f));
+  const files = (contents ?? []).filter((f) => f.type === 'file').map((f) => ({ name: f.name, path: f.name }));
+  // ponytail: one level in deployment directories; expand only for observed missed layouts.
+  const directories = (contents ?? []).filter((f) => f.type === 'dir' &&
+    ['docker', 'deploy', 'deployment', 'compose', '.docker'].includes(f.name.toLowerCase()));
+  for (const directory of directories) {
+    const children = await getRootContents(owner, repo, directory.name);
+    for (const file of children ?? []) {
+      if (file.type === 'file') files.push({ name: file.name, path: `${directory.name}/${file.name}` });
+    }
+  }
+  const dockerfilePresent = files.some((f) => DOCKERFILE_FILENAMES.has(f.name.toLowerCase()));
+  const composePath = files.find((f) => COMPOSE_FILENAMES.has(f.name.toLowerCase()))?.path ?? null;
+  const composePresent = composePath !== null;
 
   const readmeFull = readme ?? '';
   const readmeExcerpt = readmeFull ? readmeFull.slice(0, 4000) : null;
@@ -115,7 +126,7 @@ export async function analyzeRepository(
   const ports = extractPorts(combinedText);
   const screenshotUrls = readmeFull ? extractScreenshots(readmeFull, owner, repo, defaultBranch) : [];
 
-  const armMentioned = /\barm64\b|\baarch64\b|\bmulti-?arch\b/i.test(combinedText);
+  const armMentioned = /\barm64\b|\baarch64\b/i.test(combinedText);
   const amdMentioned = /\bamd64\b|\bx86[_-]?64\b/i.test(combinedText);
   const containerImageMatch = combinedText.match(
     /\b((?:ghcr\.io|docker\.io|quay\.io|registry\.hub\.docker\.com)\/[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*)/i
@@ -133,6 +144,7 @@ export async function analyzeRepository(
   return {
     dockerfilePresent,
     composePresent,
+    composePath,
     readmeExcerpt,
     readmeFull: readmeFull || null,
     screenshotUrls,
@@ -140,8 +152,8 @@ export async function analyzeRepository(
     envVars,
     ports,
     containerImage: containerImageMatch ? containerImageMatch[1] : null,
-    arm64Supported: armMentioned ? true : composePresent || dockerfilePresent ? null : false,
-    amd64Supported: amdMentioned ? true : composePresent || dockerfilePresent ? true : null,
+    arm64Supported: armMentioned ? true : null,
+    amd64Supported: amdMentioned ? true : null,
     installMethods: [...new Set(installMethods)],
     documentationUrl: readmeFull ? extractDocLink(readmeFull) : null,
     demoUrl: readmeFull ? extractDemoLink(readmeFull) : null,

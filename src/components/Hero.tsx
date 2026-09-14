@@ -1,3 +1,4 @@
+import { buildApplicationWhere } from '@/lib/query';
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
 
@@ -5,20 +6,20 @@ import { prisma } from '@/lib/db';
 // are honest. With `revalidate = 300` on the homepage, the count can be up to 5 minutes stale.
 async function getCounters() {
   const [appCount, categoryCount, dockerCount, armCount, composeCount, nasCount, verifiedCount] = await Promise.all([
-    prisma.application.count({ where: { hidden: false } }),
+    prisma.application.count({ where: { ...buildApplicationWhere({}) } }),
     prisma.application.findMany({
-      where: { hidden: false, category: { not: null } },
+      where: { ...buildApplicationWhere({}), category: { not: null } },
       select: { category: true },
       distinct: ['category'],
     }).then((rows) => rows.length),
     prisma.application.count({
-      where: { hidden: false, dockerSupported: true, composeSupported: false },
+      where: { ...buildApplicationWhere({}), dockerSupported: true, composeSupported: false },
     }),
-    prisma.application.count({ where: { hidden: false, arm64Supported: true } }),
-    prisma.application.count({ where: { hidden: false, composeSupported: true } }),
-    prisma.application.count({ where: { hidden: false, isNasFriendly: true } }),
+    prisma.application.count({ where: { ...buildApplicationWhere({}), arm64Supported: true } }),
+    prisma.application.count({ where: { ...buildApplicationWhere({}), composeSupported: true } }),
+    prisma.application.count({ where: { ...buildApplicationWhere({}), isNasFriendly: true } }),
     prisma.application.count({
-      where: { hidden: false, verificationStatus: { not: 'UNVERIFIED' } },
+      where: { ...buildApplicationWhere({}), verificationStatus: 'MANUALLY_VERIFIED' },
     }),
   ]);
   return {
@@ -51,7 +52,7 @@ export async function Hero() {
         </h1>
         <p className="text-lg text-slate-700 dark:text-slate-300 mb-6 max-w-2xl">
           {appCount.toLocaleString()} open-source apps, automatically indexed from GitHub every
-          night. Filter by health, license, Docker support, and ARM64 — find a privacy-friendly
+          night. Filter by health, Docker files, and ARM64 mentions — find a privacy-friendly
           replacement for the SaaS you&apos;re trying to leave.
         </p>
         <div className="flex flex-wrap gap-3 mb-8">
@@ -81,8 +82,8 @@ export async function Hero() {
           </p>
           <div className="flex flex-wrap gap-2">
             <Chip href="/tag/docker-compose" count={composeCount} dotClass="bg-sky-500">Docker Compose</Chip>
-            <Chip href="/tag/arm64" count={armCount} dotClass="bg-emerald-500">ARM64 / NAS</Chip>
-            <Chip href="/tag/nas-friendly" count={nasCount} dotClass="bg-amber-500">NAS-friendly</Chip>
+            <Chip href="/tag/arm64" count={armCount} dotClass="bg-emerald-500">ARM64 mentioned</Chip>
+            <Chip href="/tag/nas-friendly" count={nasCount} dotClass="bg-amber-500">NAS signals</Chip>
             <Chip href="/tag/docker" count={dockerCount} dotClass="bg-indigo-500">Docker</Chip>
           </div>
         </div>
@@ -90,8 +91,8 @@ export async function Hero() {
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
           <Stat label="apps indexed" value={appCount.toLocaleString()} />
           <Stat label="categories" value={categoryCount.toString()} />
-          <Stat label="Docker-ready" value={dockerCount.toLocaleString()} />
-          <Stat label="ARM64 / NAS" value={armCount.toLocaleString()} />
+          <Stat label="Docker files detected" value={(dockerCount + composeCount).toLocaleString()} />
+          <Stat label="ARM64 mentioned" value={armCount.toLocaleString()} />
         </dl>
         <p className="text-xs text-slate-500 mt-4">
           {verifiedCount.toLocaleString()} entries manually reviewed · Data refreshes daily ·

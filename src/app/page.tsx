@@ -1,5 +1,8 @@
+import { getCatalogPage } from '@/lib/catalog';
+import { Pagination } from '@/components/Pagination';
+import type { AppWithRepo } from '@/lib/types';
 import { prisma } from '@/lib/db';
-import { buildApplicationWhere, buildOrderBy, type SearchParams } from '@/lib/query';
+import { buildApplicationWhere, hasActiveFilters, type SearchParams } from '@/lib/query';
 import { AppCard } from '@/components/AppCard';
 import { FilterBar } from '@/components/FilterBar';
 import { SearchBar } from '@/components/SearchBar';
@@ -8,33 +11,21 @@ import { WebsiteStructuredData } from '@/components/StructuredData';
 
 export const revalidate = 300; // catalog data changes at most daily; 5 min cache is plenty
 
-function hasActiveFilters(params: SearchParams): boolean {
-  return Object.keys(params).some((k) => k !== 'sort' && params[k]);
-}
-
 export default async function HomePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams;
-  const where = buildApplicationWhere(params);
-  const sort = Array.isArray(params.sort) ? params.sort[0] : params.sort;
-  const orderBy = buildOrderBy(sort);
-
   const filtering = hasActiveFilters(params);
 
   if (filtering) {
-    const apps = await prisma.application.findMany({
-      where,
-      orderBy,
-      include: { repository: true },
-      take: 60,
-    });
+    const { apps, total, page, pages } = await getCatalogPage(params);
 
     return (
       <div>
         <WebsiteStructuredData />
         <SearchBar />
         <FilterBar />
-        <p className="text-sm text-slate-500 mb-3">{apps.length} results</p>
+        <p className="text-sm text-slate-500 mb-3">{total} results</p>
         <Grid apps={apps} />
+        <Pagination page={page} pages={pages} params={params} />
       </div>
     );
   }
@@ -86,7 +77,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   );
 }
 
-function Section({ title, apps }: { title: string; apps: any[] }) {
+function Section({ title, apps }: { title: string; apps: AppWithRepo[] }) {
   if (apps.length === 0) return null;
   return (
     <section className="mb-8">
@@ -96,7 +87,7 @@ function Section({ title, apps }: { title: string; apps: any[] }) {
   );
 }
 
-function Grid({ apps }: { apps: any[] }) {
+function Grid({ apps }: { apps: AppWithRepo[] }) {
   if (apps.length === 0) {
     return <p className="text-sm text-slate-500">No applications match these filters yet.</p>;
   }

@@ -1,10 +1,12 @@
 import { notFound } from 'next/navigation';
-import { prisma } from '@/lib/db';
+import { getCatalogPage } from '@/lib/catalog';
+import { Pagination } from '@/components/Pagination';
+import type { SearchParams } from '@/lib/query';
 import { CATEGORIES } from '@/lib/constants';
 import { AppCard } from '@/components/AppCard';
 import { CategoryIcon } from '@/components/CategoryIcon';
 
-export const revalidate = 300;
+export const dynamic = 'force-dynamic';
 
 // Map a URL slug back to its display name ("media" → "Media", "home-automation" → "Home Automation").
 function slugify(name: string): string {
@@ -35,21 +37,13 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   };
 }
 
-export default async function CategoryPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function CategoryPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<SearchParams> }) {
   const { slug } = await params;
   const name = unslugify(slug);
   if (!name) notFound();
 
-  const apps = await prisma.application.findMany({
-    where: {
-      hidden: false,
-      category: name,
-      repository: { unreachable: false },
-    },
-    include: { repository: true },
-    orderBy: { healthScore: 'desc' },
-    take: 60,
-  });
+  const query = await searchParams;
+  const { apps, total, page, pages } = await getCatalogPage(query, { category: name });
 
   return (
     <div>
@@ -63,7 +57,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
             Self-hosted {name} apps
           </h1>
           <p className="text-slate-600 dark:text-slate-400 max-w-2xl">
-            {apps.length} {apps.length === 1 ? 'project' : 'projects'} found in the{' '}
+            {total} {total === 1 ? 'project' : 'projects'} found in the{' '}
             <strong>{name}</strong> category. Sorted by health score.
           </p>
         </div>
@@ -78,6 +72,8 @@ export default async function CategoryPage({ params }: { params: Promise<{ slug:
           ))}
         </div>
       )}
+
+      <Pagination page={page} pages={pages} params={query} pathname={`/category/${slug}`} />
 
       <p className="text-sm text-slate-500 mt-8">
         <a href="/" className="underline">← All categories</a>

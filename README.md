@@ -322,3 +322,26 @@ Steps once the site is live:
    Indexing" for the homepage, the top 3 category pages, and the top 5 app pages.
 
 Expect 2-7 days for the first pages to land in Google, 1-3 days for Bing.
+
+## Catalog search and evidence update
+
+Apply migrations before starting the updated web app (`pnpm prisma:migrate`). The new
+nullable `composePath` records the actual detected file, including one level under
+`docker`, `deploy`, `deployment`, `compose`, or `.docker`. Existing listings without a
+path link to the repository instead of guessing a filename.
+
+The migration resets old automated ARM64/AMD64 values to unknown, preserving explicit
+manual field overrides. New discovery scans populate architecture mentions and field
+provenance again; this happens when a repository is rediscovered, not during liveness
+reconciliation. Mentions are not installation tests. An empty database list means unknown,
+not “no external database”, and no longer earns a lightweight-database score bonus.
+Run the usual snapshot job after migrating to refresh existing scores.
+
+Search understands “alternative to …” and “self-hosted …”, ignores case for alternative
+names, and puts exact names/alternatives first unless an explicit sort is selected.
+Home results, category pages and tags paginate in groups of 60 with full counts.
+
+The PostgreSQL regression test is opt-in locally and runs in CI. Against a **disposable**
+migrated database, run `TEST_DATABASE_URL=postgresql://… pnpm test`. It checks exact-match
+ranking, pagination, exclusions, filters, and parameterized search; its temporary rows
+are removed afterwards.

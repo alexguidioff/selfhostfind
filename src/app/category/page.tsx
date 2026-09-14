@@ -1,3 +1,4 @@
+import { buildApplicationWhere } from '@/lib/query';
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { CATEGORIES } from '@/lib/constants';
@@ -23,7 +24,7 @@ export default async function CategoryIndex() {
       slug: slugify(c),
       count: await prisma.application.count({
         where: {
-          hidden: false,
+          ...buildApplicationWhere({}),
           category: c,
           repository: { unreachable: false },
         },

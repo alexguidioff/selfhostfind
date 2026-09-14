@@ -73,3 +73,8 @@ describe('computeScores', () => {
     expect(minimal.healthScore).toBeGreaterThanOrEqual(0);
   });
 });
+
+it('does not award a lightweight-database bonus for unknown requirements', () => {
+  expect(computeScores({ ...baseInput, databases: [] }).nasCompatibilityScore)
+    .toBeLessThan(computeScores(baseInput).nasCompatibilityScore);
+});

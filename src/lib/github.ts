@@ -161,9 +161,10 @@ export async function getRepositoryById(githubId: number | bigint): Promise<Repo
 // downloading the whole repo.
 export async function getRootContents(
   owner: string,
-  repo: string
+  repo: string,
+  path = ''
 ): Promise<Array<{ name: string; type: string }> | null> {
-  const res = await ghFetch(`/repos/${owner}/${repo}/contents/`);
+  const res = await ghFetch(`/repos/${owner}/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}`);
   if (!res.ok) return null;
   const data = await res.json();
   return Array.isArray(data) ? data.map((f: any) => ({ name: f.name, type: f.type })) : null;

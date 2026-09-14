@@ -1,3 +1,4 @@
+import { composeUrl, evidenceLabel } from '@/lib/evidence';
 import { notFound } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -107,41 +108,42 @@ export default async function AppDetailPage({ params }: { params: Promise<{ slug
           <div className="mt-6">
             <h2 className="font-semibold mb-2">Installation</h2>
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">
-              This project ships a Docker Compose file — see the repository for the full, current version.
+              A Compose file was detected. Review the upstream instructions; installation has not been tested.
             </p>
             <a
-              href={`${app.repository.repositoryUrl}/blob/${app.repository.defaultBranch}/docker-compose.yml`}
+              href={composeUrl(app)}
               target="_blank"
               rel="noreferrer"
               className="text-brand-600 dark:text-brand-500 text-sm underline"
             >
-              View docker-compose.yml on GitHub →
+              {app.composePath ? `View ${app.composePath} on GitHub →` : 'Open repository for installation instructions →'}
             </a>
           </div>
         )}
 
-        {(app.databases.length > 0 || app.envVars.length > 0 || app.ports.length > 0) && (
-          <div className="mt-6 grid sm:grid-cols-3 gap-4 text-sm">
-            {app.databases.length > 0 && (
-              <div>
-                <h3 className="font-medium mb-1">Databases</h3>
-                <p className="text-slate-600 dark:text-slate-400">{app.databases.join(', ')}</p>
+        <section className="mt-6 text-sm" aria-labelledby="compatibility-heading">
+          <h2 id="compatibility-heading" className="font-semibold mb-2">Compatibility and evidence</h2>
+          <p className="text-slate-500 mb-3">
+            Last analyzed: {app.repository.lastScannedAt?.toISOString().slice(0, 10) ?? 'Unknown'}.
+            Automatic checks do not test installation or hardware compatibility.
+          </p>
+          <dl className="grid sm:grid-cols-2 gap-4">
+            {([
+              ['databases', 'Databases', app.databases.join(', ') || 'Unknown'],
+              ['arm64Supported', 'ARM64', app.arm64Supported == null ? 'Unknown' : app.arm64Supported ? 'Reported' : 'Reported unsupported'],
+              ['amd64Supported', 'AMD64', app.amd64Supported == null ? 'Unknown' : app.amd64Supported ? 'Reported' : 'Reported unsupported'],
+              ['composeSupported', 'Compose', app.composeSupported ? (app.composePath ?? 'Detected; path unknown') : 'Not detected'],
+              ['ports', 'Ports', app.ports.join(', ') || 'Unknown'],
+              ['isNasFriendly', 'NAS', app.isNasFriendly ? 'Related signals found' : 'Unknown'],
+            ] as const).map(([field, label, value]) => (
+              <div key={field}>
+                <dt className="font-medium">{label}</dt>
+                <dd>{value}<span className="block text-xs text-slate-500">{evidenceLabel(app, field)}</span></dd>
               </div>
-            )}
-            {app.ports.length > 0 && (
-              <div>
-                <h3 className="font-medium mb-1">Exposed ports</h3>
-                <p className="text-slate-600 dark:text-slate-400">{app.ports.join(', ')}</p>
-              </div>
-            )}
-            <div>
-              <h3 className="font-medium mb-1">Architectures</h3>
-              <p className="text-slate-600 dark:text-slate-400">
-                {[app.amd64Supported && 'amd64', app.arm64Supported && 'arm64'].filter(Boolean).join(', ') || 'Unknown'}
-              </p>
-            </div>
-          </div>
-        )}
+            ))}
+          </dl>
+          <a className="inline-block underline mt-3" href={`${app.repository.repositoryUrl}#readme`} target="_blank" rel="noreferrer">Read upstream evidence →</a>
+        </section>
 
         {alternatives.length > 0 && (
           <div className="mt-8">
@@ -189,8 +191,8 @@ export default async function AppDetailPage({ params }: { params: Promise<{ slug
         <div className="flex flex-wrap gap-1.5">
           {app.composeSupported && <Badge variant="docker">Docker Compose</Badge>}
           {!app.composeSupported && app.dockerSupported && <Badge variant="docker">Docker</Badge>}
-          {app.arm64Supported && <Badge variant="arm">ARM64</Badge>}
-          {app.isNasFriendly && <Badge variant="arm">NAS-friendly</Badge>}
+          {app.arm64Supported && <Badge variant="arm">ARM64 mentioned</Badge>}
+          {app.isNasFriendly && <Badge variant="arm">NAS signals</Badge>}
         </div>
       </aside>
     </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildApplicationWhere, buildOrderBy } from '@/lib/query';
+import { buildApplicationWhere, buildOrderBy, normalizeSearch, pageNumber, hasActiveFilters } from '@/lib/query';
 
 describe('buildApplicationWhere', () => {
   it('always excludes hidden, non-self-hosted, and unreachable (deleted/transferred) entries', () => {
@@ -9,12 +9,14 @@ describe('buildApplicationWhere', () => {
     expect(where.repository).toEqual({ unreachable: false });
   });
 
-  it('builds a free-text search across name/description/category/alternatives', () => {
-    const where = buildApplicationWhere({ q: 'splitwise' });
-    expect(where.OR).toBeDefined();
-    expect(where.OR).toEqual(
-      expect.arrayContaining([expect.objectContaining({ alternativesTo: { has: 'splitwise' } })])
-    );
+  it('normalizes discovery phrases and recognizes sort-only navigation', () => {
+    expect(normalizeSearch(' Alternative to GOOGLE   Photos ')).toBe('google photos');
+    expect(normalizeSearch('self-hosted notes')).toBe('notes');
+    expect(hasActiveFilters({ sort: 'newest' })).toBe(true);
+    expect(hasActiveFilters({})).toBe(false);
+    expect(pageNumber({ page: '-1' })).toBe(1);
+    expect(pageNumber({ page: 'Infinity' })).toBe(1);
+    expect(pageNumber({ page: '2' })).toBe(2);
   });
 
   it('maps boolean filter toggles to Prisma equality filters', () => {
@@ -25,7 +27,7 @@ describe('buildApplicationWhere', () => {
     expect(where.isNasFriendly).toBe(true);
   });
 
-  it('treats database=none as "no external database"', () => {
+  it('treats database=none as unknown database requirements', () => {
     const where = buildApplicationWhere({ database: 'none' });
     expect(where.databases).toEqual({ equals: [] });
   });

@@ -42,6 +42,8 @@ jobs:
       - run: pnpm prisma migrate deploy
       - run: pnpm typecheck
       - run: pnpm test
+        env:
+          TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
       - run: pnpm build
 
   # This job is the one branch protection should require — it never runs unless every job

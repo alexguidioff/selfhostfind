@@ -46,7 +46,7 @@ export function AppCard({ app }: { app: AppWithRepo }) {
       <div className="flex flex-wrap items-center gap-1.5 mt-3">
         {app.composeSupported && <Badge variant="docker">Docker Compose</Badge>}
         {!app.composeSupported && app.dockerSupported && <Badge variant="docker">Docker</Badge>}
-        {app.arm64Supported && <Badge variant="arm">ARM64</Badge>}
+        {app.arm64Supported && <Badge variant="arm">ARM64 mentioned</Badge>}
         {app.repository.license && <Badge variant="license">{app.repository.license}</Badge>}
         {app.repository.archived && <Badge variant="archived">Archived upstream</Badge>}
         <Badge variant={app.verificationStatus === 'UNVERIFIED' ? 'unverified' : 'verified'}>
