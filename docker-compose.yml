@@ -32,6 +32,11 @@ services:
     build:
       context: .
       target: runner
+      # NEXT_PUBLIC_* vars must be present at build time, not just at runtime. Pass
+      # them via args so the client bundle reflects the operator's actual config.
+      args:
+        NEXT_PUBLIC_SEARCH_LOG_ENABLED: ${SEARCH_LOG_ENABLED:-false}
+        NEXT_PUBLIC_REPORT_REPO: ${NEXT_PUBLIC_REPORT_REPO:-alexguidioff/selfhostfind}
     restart: unless-stopped
     depends_on:
       db:

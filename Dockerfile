@@ -17,6 +17,13 @@ COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 RUN pnpm install --frozen-lockfile || pnpm install
 
 FROM base AS builder
+# NEXT_PUBLIC_* vars are baked into the client bundle at build time, so they MUST be
+# present here, not just in the runtime environment. docker-compose passes them via
+# `args` to be explicit about which surface they affect.
+ARG NEXT_PUBLIC_SEARCH_LOG_ENABLED=false
+ARG NEXT_PUBLIC_REPORT_REPO=alexguidioff/selfhostfind
+ENV NEXT_PUBLIC_SEARCH_LOG_ENABLED=$NEXT_PUBLIC_SEARCH_LOG_ENABLED
+ENV NEXT_PUBLIC_REPORT_REPO=$NEXT_PUBLIC_REPORT_REPO
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm prisma generate

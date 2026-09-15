@@ -72,9 +72,10 @@ export function SearchBar() {
       />
       {SEARCH_LOG_ENABLED && (
         <p className="mt-1 text-[11px] text-slate-500">
-          Anonymous search terms are collected when the query returns nothing, so we can
-          spot catalog gaps. No IP, user agent, or session id is stored. Aggregated over
-          30 days.
+          Every search you submit is recorded (not just no-result ones) as a daily
+          aggregate. We don&apos;t record your IP, user agent, cookies, or session id.
+          Aggregates are kept for 30 days. Drop the SEARCH_LOG_ENABLED env var to turn
+          this off.
         </p>
       )}
     </form>

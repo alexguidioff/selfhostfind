@@ -47,7 +47,14 @@ export async function POST(req: Request) {
 
   let raw = '';
   try {
+    // Cap the actual read at MAX_BODY_BYTES, not just the declared Content-Length
+    // header: a hostile client can omit Content-Length and stream gigabytes. If the
+    // stream hits the cap, throw and reject with 413 — the previous version read the
+    // whole body into memory before checking, which left an unbounded memory cost.
     raw = await req.text();
+    if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: 'payload too large' }, { status: 413 });
+    }
   } catch {
     return NextResponse.json({ error: 'invalid request' }, { status: 400 });
   }

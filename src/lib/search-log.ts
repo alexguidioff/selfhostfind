@@ -170,12 +170,17 @@ export async function recordSearch({ query, params, context }: LogInput): Promis
 
     // Atomic increment: $queryRaw with ON CONFLICT keeps both counters consistent even
     // when two requests land in the same millisecond.
+    // The unique key is (dayUtc, normalizedQuery, filterSignature, context). Including
+    // context here means a search from the home page and the same search from an
+    // alternatives list are aggregated separately, which is what the admin view needs
+    // to tell "global gap" apart from "local gap". The schema's @@unique on the first
+    // three columns is augmented with context by the migration below.
     await prisma.$executeRaw`
       INSERT INTO "SearchAggregate" (id, "dayUtc", "normalizedQuery", "filterSignature", "context",
                                       "searchCount", "zeroResultCount", "createdAt", "updatedAt")
       VALUES (gen_random_uuid()::text, ${dayUtc}, ${normalized}, ${signature}, ${safeContext},
               1, ${zeroResult ? 1 : 0}, NOW(), NOW())
-      ON CONFLICT ("dayUtc", "normalizedQuery", "filterSignature") DO UPDATE
+      ON CONFLICT ("dayUtc", "normalizedQuery", "filterSignature", "context") DO UPDATE
         SET "searchCount" = "SearchAggregate"."searchCount" + 1,
             "zeroResultCount" = "SearchAggregate"."zeroResultCount" + ${zeroResult ? 1 : 0},
             "updatedAt" = NOW()

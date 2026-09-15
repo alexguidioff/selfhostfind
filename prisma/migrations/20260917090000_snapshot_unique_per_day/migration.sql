@@ -15,10 +15,17 @@
 -- 1. Add the column. Existing rows get NULL; we backfill next.
 ALTER TABLE "MetricSnapshot" ADD COLUMN "recordedDay" DATE;
 
--- 2. Backfill recordedDay from existing recordedAt, treating it as UTC (the snapshot
---    job always writes UTC values, by the project's convention).
+-- 2. Backfill recordedDay from existing recordedAt, treating the stored value as
+--    UTC (the snapshot job always writes UTC values, by the project's convention).
+--
+--    `date_trunc('day', ts AT TIME ZONE 'UTC')` is preferred over `(ts AT TIME ZONE
+--    'UTC')::date` because the explicit AT TIME ZONE makes the conversion happen in a
+--    single step instead of relying on the session's TimeZone setting for the implicit
+--    cast. The previous version (the broken one before this migration's fix) implicitly
+--    relied on the session being UTC; a session in Europe/Rome would have classified
+--    late-evening rows into the next calendar day.
 UPDATE "MetricSnapshot"
-SET "recordedDay" = ("recordedAt" AT TIME ZONE 'UTC')::date
+SET "recordedDay" = date_trunc('day', "recordedAt" AT TIME ZONE 'UTC')::date
 WHERE "recordedDay" IS NULL;
 
 -- 3. For the few repositories that have more than one row per UTC day, keep the latest

@@ -197,7 +197,7 @@ model SearchAggregate {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  @@unique([dayUtc, normalizedQuery, filterSignature])
+  @@unique([dayUtc, normalizedQuery, filterSignature, context])
   @@index([dayUtc])
 }
 
