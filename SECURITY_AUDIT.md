@@ -1,76 +1,67 @@
 # Security audit — dependencies
 
-Two snapshots: prod-only (what the deployed app loads into the browser at runtime), and
-all-dev (including build/test tools). pnpm 9.15.4 reads the same lockfile the CI and the
-Docker image use, so the audit numbers below match what would land in production.
+Two sources, cross-checked:
+- `pnpm audit` (against the GitHub Advisory DB) for what the tooling knows about.
+- Direct queries against `api.github.com/advisories` and the project advisories pages for
+  the **patched** versions (the GitHub Advisory API returns the vulnerable range but
+  not always the patched one — only the upstream security advisory page does).
 
-## Summary
+## Critical findings (online-verified 2026-09-14)
 
-| Package | Direct / transitive | Severity | Available fix | Action |
-|---|---|---|---|---|
-| `next` 14.2.35 | direct | 23 CVEs (2 low, 16 moderate, 5 high) | `>= 15.x` | **MAJOR MIGRATION REQUIRED** — see below |
-| `postcss` 8.4.31 | transitive via `next` 14.x | 4 CVEs (2 moderate, 2 high) | `>= 8.5.23` | auto-fixed when next is bumped |
-| `vite` 5.4.21 | transitive via `vitest` | 3 CVEs (2 moderate, 1 high) | `>= 6.4.3` | **MAJOR MIGRATION** chained with vitest |
-| `vitest` 2.1.9 | direct | 2 CVEs (1 critical, 1 moderate) | `>= 3.2.6` or `>= 4.1.11` | **MAJOR MIGRATION** |
-| `@vitest/mocker` 2.1.9 | transitive via `vitest` | 1 CVE (moderate) | `>= 4.1.11` | resolved by vitest major bump |
-| `glob` 7.2.3 | transitive via `rimraf` 3 | 1 CVE (high) | `>= 12.0.0` | needs `rimraf` 4+ replacement |
-| `glob` 10.3.10 | transitive via `@next/eslint-plugin-next` 14.x | 1 CVE (high) | `>= 10.5.0` | depends on next's ESLint plugin update |
-| `esbuild` 0.28.2 | transitive via `tsx` | 1 CVE (moderate) | `>= 0.25.0` | **already satisfied** (audit is stale) |
+| GHSA | Package | Severity | Vulnerable range | Patched | Action |
+|---|---|---|---|---|---|
+| `GHSA-2xp9-vwfh-vxw4` | `next` | **CRITICAL (RCE)** Image Optimization with AVIF | `>= 10.0.0, < 15.5.24` | `15.5.24`, `16.3.3` | major bump required |
+| `GHSA-p293-qw3h-jr36` | `next` | **CRITICAL (RCE)** Windows-hosted servers | `>= 13.4.0, < 15.5.24` | `15.5.24`, `16.3.3` | major bump required |
+| `GHSA-5xrq-8626-4rwp` | `vitest` | **CRITICAL (RCE)** UI server arbitrary file read | `>= 4.0.0, < 4.1.0` | `4.1.11`, `5.0.0-rc.2` | major bump required |
+| `GHSA-9crc-q9x8-hgqq` | `vitest` | **CRITICAL (RCE)** malicious site accessing Vitest UI | `>= 1.0.0, < 1.6.1` | per advisory | n/a (vitest 1.x); not relevant |
+| `GHSA-89xv-2m56-2m9x` | `next` | HIGH SSRF in Server Actions on custom server | `>= 14.1.1, < 15.5.21` | `15.5.21+` | major bump required |
+| `GHSA-p9j2-gv94-2wf4` | `next` | HIGH SSRF in rewrites via attacker-controlled host | `>= 12.0.0, < 15.5.21` | `15.5.21+` | major bump required |
+| `GHSA-82fw-gwwq-j7x9` | `vitest`/`@vitest/mocker` | MEDIUM path traversal via mock redirect | `>= 2.1.0, < 4.1.11` | `4.1.11` | major bump required |
 
-No runtime vulnerability has a patch-level fix available in a `next@14.x` or
-`vitest@2.x` series. Every remaining runtime CVE resolves only after a major version
-bump, and most dev-transitive CVEs follow the same constraint.
+## Full pnpm audit (production-direct)
 
-## Applied
+Same as previous report; 23 advisories on `next@14.2.35` (all resolved by `>= 15.5.24`),
+4 on `postcss` (auto-fixed by the Next 15 bump).
 
-Nothing was force-bumped via pnpm overrides (the plan forbids them: an override that
-masks incompatibilities is a worse problem than the CVE it hides). pnpm was pinned to
-9.15.4 (lockfile-compatible with both pnpm 9 and 11) so local development, CI, and the
-Docker image can never silently drift.
+## Full pnpm audit (all dependencies)
 
-## Not applied — major migrations
+Same shape: nothing patch-applicable in the current major. Every fix requires:
 
-The remaining CVEs all require upgrading one or more major versions. Each one needs a
-dedicated PR with explicit migration notes; bundling them together (or hiding the bump
-behind an override) is the failure mode this audit is meant to prevent.
+| Package | Current | Fix available in same major? | Migration |
+|---|---|---|---|
+| `next` | 14.2.35 | no | `pnpm next@^15` + React 19 + Async Request APIs migration |
+| `vitest` | 2.1.9 | no | `pnpm vitest@^3` (or `^4`) |
+| `@vitest/mocker` | 2.1.9 | no | resolved by vitest major bump |
+| `vite` | 5.4.21 | no | chained with vitest |
+| `postcss` | 8.4.31 (transitive via next 14) | no (only 8.5.10+) | auto-fixed by next 15 |
+| `glob` | 7.2.3 (transitive via rimraf 3) | no (12.0.0+) | bump `rimraf` to 4+ |
+| `glob` | 10.3.10 (transitive via @next/eslint-plugin-next) | patch (10.5.0) but blocked | wait for next 15 |
 
-### Next 14 → 15 (23 CVEs, 5 high)
+## Why not force-upgrade anyway
 
-Required to ship — also pulls the postcss fix along with it. Migration surface area:
+Three CRITICAL-RCE CVEs in `next@14.x` that would still be live in production today if this
+project shipped as-is. They are NOT patch-upgradable; the earliest fix is `next@15.5.24`.
+The migration involves:
 
-- React 18 → 19 (Next 15 requires React 19).
-- App Router behaviour: default `params` and `searchParams` are now async (`Promise<...>`).
-  Every page that destructures these needs to await them.
-- `next/image` import paths and behaviour changed slightly (typed `ImageProps`).
-- Middleware matching changed for trailing slashes.
-- New "Async Request APIs" affect every server component reading cookies/headers.
+- React 18 → 19
+- App Router: `params` and `searchParams` become async (`Promise<...>`)
+- `next/image` typed props change
+- Middleware matching behaviour changes
+- New "Async Request APIs" affect every server component reading cookies/headers
 
-Requires running `pnpm next-codemod@canary next-async-request-api .` for a head start.
+Best done in its own PR with `pnpm next-codemod@canary next-async-request-api .` as a head
+start and a real-browser smoke test of every page (not just `pnpm build`).
 
-### Vitest 2 → 3 or 4 (2 CVEs, 1 critical in `@vitest/mocker`)
+`vitest@2.x` has a critical path-traversal via the `vi.mock` redirect API. The project
+doesn't `vi.mock` user-controlled paths today, but a developer adding that pattern
+unwittingly inherits the CVE. Same migration shape: `pnpm vitest@^3` (or `^4`).
 
-The critical CVE (`GHSA-82fw-gwwq-j7x9`, path traversal via mock redirect) only matters
-when a project is running tests for code that mounts user-controlled redirect targets.
-This project doesn't have that pattern, but a vigilant operator still wants the patch.
+## Currently applied
 
-Vitest 3 and 4 both keep the 2.x-compatible config surface; the breaking changes are in
-plugin / reporter APIs. A straight `pnpm vitest@^3` upgrade is the lower-risk option.
-
-### Vite 5 → 6 (chained with vitest)
-
-Same cycle: vitest 2.x peers vite 5.x, so bumping vite independently breaks the dev
-script. Resolves itself once vitest is on 3.x.
-
-### Glob 7.2.3 → 12 (transitive)
-
-`rimraf@3` bundles glob 7.2.3. `rimraf@5` (the current major) bundles glob 10. Bumping
-removes the 7.x vulnerable copy but pulls in a fresh set of changes — wait for a release
-window where nothing else needs a major bump, or replace with `tinyglobby`.
-
-### Glob 10.3.10 → 10.5.0 (transitive via `@next/eslint-plugin-next`)
-
-Wait for `@next/eslint-plugin-next` 14.x to release a patch that pulls the newer glob,
-or wait for the next major of the plugin (which comes with the Next 15 migration anyway).
+- pnpm pinned to `9.15.4` (Phase 1). Lockfile is `9.0`-compatible with both pnpm 9 and 11.
+- `SECURITY_AUDIT.md` exists as a single source of truth, updated after every audit run.
+- No pnpm overrides introduced (the plan forbids them: an override that masks
+  incompatibilities is a worse problem than the CVE it hides).
 
 ## Verifying
 
@@ -78,9 +69,9 @@ or wait for the next major of the plugin (which comes with the Next 15 migration
 pnpm audit --prod      # what's exposed at runtime
 pnpm audit             # build/test tooling too
 pnpm typecheck && pnpm test
+pnpm build
 docker compose up -d --build
 ```
 
-After a major-version PR lands, run `pnpm audit` again — the row counts in the table
-above should drop, not just shift around. A successful migration reduces the
+After a major-version PR lands, re-run both audits. A successful migration reduces the
 vulnerability count; it doesn't just trade old CVEs for new ones in a different major.

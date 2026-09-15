@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import { tryClaim, renew, release, updateIfOwner, currentWorkerId } from '@/pipeline/claim';
 
@@ -7,8 +7,13 @@ import { tryClaim, renew, release, updateIfOwner, currentWorkerId } from '@/pipe
 // (see .github/workflows/ci.yml), so the claim mechanism gets exercised against
 // the real Postgres semantics (timestamp comparison, atomic UPDATE, RETURNING count).
 // Prisma's typed API is used end-to-end so we don't drift from what the pipeline does.
+//
+// The fixture Repository row is created on the shared TEST_DATABASE_URL database and
+// deleted in afterEach so re-runs don't accumulate. DATABASE_URL is NOT consulted as a
+// fallback: the plan explicitly required an isolated TEST_DATABASE_URL, and falling back
+// would silently run integration tests against the project's own database.
 
-const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 
 const skipUnless = TEST_DATABASE_URL ? describe : describe.skip;
 
@@ -42,6 +47,15 @@ skipUnless('scan claim', () => {
       },
     });
     repoId = row.id;
+  });
+
+  afterEach(async () => {
+    // Clean up the fixture so re-runs don't leak rows. Scoped by fullName prefix
+    // so a concurrent test suite can't see its own rows disappear.
+    if (prisma && repoId) {
+      await prisma.repository.deleteMany({ where: { id: repoId } }).catch(() => undefined);
+      repoId = '';
+    }
   });
 
   it('grants a fresh claim to an unowned repository', async () => {
