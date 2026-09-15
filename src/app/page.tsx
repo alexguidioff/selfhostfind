@@ -36,9 +36,14 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
   // buildApplicationWhere silently didn't apply here. Not anymore.
   const baseWhere = buildApplicationWhere({});
 
+  // Trending is a 30-day ranking (per the growth-score contract in scoring.ts), not a
+  // weekly one — the old label was misleading. New applications without a 30-day
+  // snapshot history are filtered out instead of being promoted with growthScore=0.
+  const trendingWhere = { ...baseWhere, NOT: { growthScoreSource: 'insufficient-history' } };
+
   const [trending, newest, promising, updated] = await Promise.all([
     prisma.application.findMany({
-      where: baseWhere,
+      where: trendingWhere,
       orderBy: [{ growthScore: 'desc' }, { healthScore: 'desc' }],
       include: { repository: true },
       take: 8,
@@ -69,7 +74,7 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
       <Hero />
       <SearchBar />
       <FilterBar />
-      <Section title="Trending this week" apps={trending} />
+      <Section title="Trending this month" apps={trending} />
       <Section title="New applications" apps={newest} />
       <Section title="Promising projects" apps={promising} />
       <Section title="Recently updated" apps={updated} />

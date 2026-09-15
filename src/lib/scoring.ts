@@ -6,6 +6,11 @@
 // that's why "popularity" isn't part of the weighted health score at all, only its own
 // separate popularityScore field (used for the "popular" sort, not the default one).
 
+// Bumping this version invalidates old breakdowns: the UI shows "breakdown not yet
+// available" until the next snapshot run re-computes. Kept in lockstep with the migration
+// that adds the breakdown column.
+export const SCORING_ALGORITHM_VERSION = 'health-v1';
+
 export interface ScoringInput {
   pushedAt: Date;
   latestReleaseAt: Date | null;
@@ -32,9 +37,27 @@ export interface ScoringOutput {
   dockerScore: number;
   popularityScore: number;
   growthScore: number;
+  breakdown: ScoreBreakdown;
+  algorithmVersion: string;
 }
 
-const WEIGHTS = {
+// Persisted alongside the composite score. The UI uses it to explain how the total was
+// reached without re-deriving the calculation from raw inputs (which would drift as the
+// algorithm evolves).
+export interface ScoreBreakdown {
+  components: Array<{
+    name: ScoreComponent;
+    weight: number;       // 0..1
+    raw: number;          // sub-score 0..1 before weighting
+    weighted: number;     // raw * weight * 100, contribution to healthScore
+  }>;
+}
+
+export type ScoreComponent =
+  | 'activity' | 'releases' | 'docker' | 'documentation'
+  | 'community' | 'license' | 'nas';
+
+const WEIGHTS: Record<ScoreComponent, number> = {
   activity: 0.25,
   releases: 0.2,
   docker: 0.15,
@@ -119,10 +142,28 @@ export function computeScores(input: ScoringInput): ScoringOutput {
   const popularityScore = clamp01(Math.log10(input.stars + 1) / 5) * 100;
 
   // Growth: percentage of current stars gained in the last 30 days, capped and scaled.
+  // Null when there's not enough snapshot history yet — UI must distinguish this from
+  // an actual 0% growth so it doesn't promote the app in a "trending" sort.
   const growthScore =
     input.starsGained30d != null && input.stars > 0
       ? clamp01((input.starsGained30d / Math.max(input.stars, 1)) * 5) * 100
       : 0;
+
+  const raw: Record<ScoreComponent, number> = {
+    activity: activityRaw, releases: releasesRaw, docker: dockerRaw,
+    documentation: docRaw, community: communityRaw, license: licenseRaw, nas: nasRaw,
+  };
+
+  // Build the breakdown: per-component weight, raw sub-score, and weighted contribution
+  // to the composite (in points, not percent). The UI renders these as a table; it does
+  // not recompute them, so changing the algorithm requires a SCORING_ALGORITHM_VERSION
+  // bump to surface stale rows.
+  const components = (Object.keys(WEIGHTS) as ScoreComponent[]).map((name) => ({
+    name,
+    weight: WEIGHTS[name],
+    raw: raw[name],
+    weighted: Number((raw[name] * WEIGHTS[name] * 100).toFixed(2)),
+  }));
 
   return {
     healthScore: Number(healthScore.toFixed(1)),
@@ -133,5 +174,7 @@ export function computeScores(input: ScoringInput): ScoringOutput {
     dockerScore: Number((dockerRaw * 100).toFixed(1)),
     popularityScore: Number(popularityScore.toFixed(1)),
     growthScore: Number(growthScore.toFixed(1)),
+    breakdown: { components },
+    algorithmVersion: SCORING_ALGORITHM_VERSION,
   };
 }

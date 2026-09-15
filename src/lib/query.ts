@@ -80,6 +80,11 @@ export function buildApplicationWhere(params: SearchParams, alternativeIds: stri
 export function buildOrderBy(sort: string | undefined): Prisma.ApplicationOrderByWithRelationInput[] {
   switch (sort) {
     case 'trending':
+      // The "trending" sort uses growthScore (a 30-day delta) and is only meaningful for
+      // repositories that actually have enough snapshot history. The accompanying filter
+      // excludes rows still labeled 'insufficient-history' so a brand-new app with
+      // growthScore=0 doesn't sneak into the top of the list just because its real
+      // 30-day delta is unknown.
       return [{ growthScore: 'desc' }, { healthScore: 'desc' }];
     case 'newest':
       return [{ createdAt: 'desc' }];
@@ -91,4 +96,13 @@ export function buildOrderBy(sort: string | undefined): Prisma.ApplicationOrderB
     default:
       return [{ healthScore: 'desc' }];
   }
+}
+
+// Filter applied on top of buildApplicationWhere when the user explicitly asks for the
+// trending sort. App rows with growthScoreSource='insufficient-history' can't be ranked
+// honestly against the others, so we drop them from the result set rather than silently
+// promoting them at random.
+export function trendingFilter(sort: string | undefined): Prisma.ApplicationWhereInput | null {
+  if (sort !== 'trending') return null;
+  return { NOT: { growthScoreSource: 'insufficient-history' } };
 }

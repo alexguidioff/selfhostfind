@@ -78,3 +78,35 @@ it('does not award a lightweight-database bonus for unknown requirements', () =>
   expect(computeScores({ ...baseInput, databases: [] }).nasCompatibilityScore)
     .toBeLessThan(computeScores(baseInput).nasCompatibilityScore);
 });
+
+describe('computeScores breakdown', () => {
+  const WEIGHTS = { activity: 0.25, releases: 0.2, docker: 0.15, documentation: 0.15,
+    community: 0.1, license: 0.05, nas: 0.1 };
+
+  it('exposes a per-component breakdown that sums to healthScore within rounding', () => {
+    const scores = computeScores(baseInput);
+    const total = scores.breakdown.components.reduce((sum, c) => sum + c.weighted, 0);
+    expect(Math.abs(total - scores.healthScore)).toBeLessThan(0.5);
+  });
+
+  it('uses weights that match the documented contract', () => {
+    const scores = computeScores(baseInput);
+    const byName = Object.fromEntries(scores.breakdown.components.map((c) => [c.name, c.weight]));
+    expect(byName).toEqual(WEIGHTS);
+  });
+
+  it('stamps every computation with the current algorithm version', () => {
+    const scores = computeScores(baseInput);
+    expect(scores.algorithmVersion).toMatch(/^health-v\d+$/);
+  });
+
+  it('returns 0 growthScore (not null) when starsGained30d is null, distinguishing "no data" in a separate field', () => {
+    // The numeric growthScore is 0 in both "real zero" and "insufficient history" cases —
+    // callers use growthScoreSource (a sibling field the snapshot job writes) to tell
+    // them apart. Here we just confirm the breakdown still computes correctly when growth
+    // is unknown.
+    const scores = computeScores({ ...baseInput, starsGained30d: null });
+    expect(scores.growthScore).toBe(0);
+    expect(scores.breakdown.components).toHaveLength(7);
+  });
+});

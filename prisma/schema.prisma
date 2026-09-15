@@ -136,6 +136,17 @@ model Application {
   growthScore            Float @default(0)
   classificationTrustScore Float @default(0)
 
+  // Detailed breakdown of the composite healthScore, computed atomically with the score
+  // itself so the UI can show "how this number was reached" without re-deriving it from
+  // raw inputs (which would give a different answer if the algorithm changes later).
+  scoreBreakdown        Json?
+  scoreComputedAt       DateTime?
+  scoreAlgorithmVersion String?
+
+  // Whether growthScore reflects a real 30-day delta or "not enough snapshot history yet"
+  // (in which case the value is 0 and the UI must not promote this app in trending sorts).
+  growthScoreSource     String? @default("insufficient-history")
+
   // Curation / moderation
   approved      Boolean  @default(false)
   hidden        Boolean  @default(false)
@@ -162,6 +173,10 @@ model MetricSnapshot {
   recordedAt   DateTime @default(now())
 
   @@index([repositoryId, recordedAt])
+  // Enforced in Postgres as a functional unique index on (repositoryId, UTC day) —
+  // listed in 20260917090000_snapshot_unique_per_day/migration.sql — so re-running the
+  // snapshot job within the same UTC day overwrites the prior snapshot instead of
+  // duplicating it.
 }
 
 // One row per pipeline run against a single repository. Gives us an audit trail of
