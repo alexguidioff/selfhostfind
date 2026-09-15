@@ -78,7 +78,7 @@ export default async function SearchStatsPage() {
 
       <h2 className="text-sm font-semibold mt-6 mb-2">Unfiltered queries</h2>
       <p className="text-xs text-slate-500 mb-2">
-        These are the strongest "the catalog is missing something" signals: a search hits
+        These are the strongest &ldquo;the catalog is missing something&rdquo; signals: a search hits
         the full catalog and finds nothing.
       </p>
       <StatsTable rows={flat.filter((r) => r.filters === '(no filters)')} />
