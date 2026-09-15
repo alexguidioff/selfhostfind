@@ -32,6 +32,14 @@ describe('buildPreserveMap', () => {
     expect(map.dockerSupported).toBe('preserved-stale');
     expect(map.composeSupported).toBe('preserved-stale');
     expect(map.composePath).toBe('preserved-stale');
+    // ARM64/AMD64 are detected from README content (see analyze.ts armMentioned regex),
+    // so a contents error doesn't affect them — only a README error does.
+    expect(map.arm64Supported).toBe('fresh-analysis');
+    expect(map.amd64Supported).toBe('fresh-analysis');
+  });
+
+  it('preserves arm64/amd64 fields when the README call transient-errors', () => {
+    const map = buildPreserveMap({ ...baseDiag, readmeStatus: 'transient_error' });
     expect(map.arm64Supported).toBe('preserved-stale');
     expect(map.amd64Supported).toBe('preserved-stale');
   });
