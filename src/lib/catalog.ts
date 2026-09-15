@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from './db';
-import { buildApplicationWhere, buildOrderBy, normalizeSearch, pageNumber, PAGE_SIZE, str, type SearchParams } from './query';
+import { buildApplicationWhere, buildOrderBy, normalizeSearch, pageNumber, PAGE_SIZE, str, trendingFilter, type SearchParams } from './query';
 
 export async function getCatalogPage(params: SearchParams, scope: Prisma.ApplicationWhereInput = {}) {
   const q = normalizeSearch(str(params, 'q') ?? '');
@@ -11,11 +11,14 @@ export async function getCatalogPage(params: SearchParams, scope: Prisma.Applica
       WHERE lower(regexp_replace(trim(product), '[[:space:]]+', ' ', 'g')) = ${q})
   ` : [];
   const ids = alternatives.map((app) => app.id);
-  const where: Prisma.ApplicationWhereInput = { AND: [buildApplicationWhere(params, ids), scope] };
+  const sort = str(params, 'sort');
+  const trendingWhere = trendingFilter(sort);
+  const where: Prisma.ApplicationWhereInput = {
+    AND: [buildApplicationWhere(params, ids), scope, ...(trendingWhere ? [trendingWhere] : [])],
+  };
   const exact: Prisma.ApplicationWhereInput = { OR: [
     { name: { equals: q, mode: 'insensitive' } }, { id: { in: ids } },
   ] };
-  const sort = str(params, 'sort');
   const prioritizeExact = Boolean(q) && !sort;
   const orderBy = [...buildOrderBy(sort), { id: 'asc' as const }];
   return prisma.$transaction(async (tx) => {

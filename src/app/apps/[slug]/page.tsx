@@ -7,6 +7,7 @@ import { Badge } from '@/components/Badge';
 import { AppCard } from '@/components/AppCard';
 import { AppStructuredData } from '@/components/StructuredData';
 import { ReportErrorLink } from '@/components/ReportLinks';
+import { HealthBreakdown } from '@/components/HealthBreakdown';
 import { timeAgo } from '@/lib/types';
 
 export const revalidate = 300;
@@ -123,7 +124,14 @@ export default async function AppDetailPage({ params }: { params: Promise<{ slug
         )}
 
         <section className="mt-6 text-sm" aria-labelledby="compatibility-heading">
-          <h2 id="compatibility-heading" className="font-semibold mb-2">Compatibility and evidence</h2>
+          <HealthBreakdown
+            score={app.healthScore}
+            breakdown={app.scoreBreakdown as never}
+            algorithmVersion={app.scoreAlgorithmVersion}
+            computedAt={app.scoreComputedAt}
+            isManualOverride={Boolean((app.manualOverrides as Record<string, boolean> | null)?.healthScore)}
+          />
+          <h2 id="compatibility-heading" className="font-semibold mb-2 mt-4">Compatibility and evidence</h2>
           <p className="text-slate-500 mb-3">
             Last analyzed: {app.repository.lastScannedAt?.toISOString().slice(0, 10) ?? 'Unknown'}.
             Automatic checks do not test installation or hardware compatibility.

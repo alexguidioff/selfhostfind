@@ -31,3 +31,17 @@ export async function computeStarsGained30d(
   if (!reference) return { starsGained: null, source: 'insufficient-history' };
   return { starsGained: currentStars - reference.stars, source: 'computed' };
 }
+
+// Discovery variant: takes the GitHub numeric ID rather than our Repository row id,
+// because discovery is the path that creates the row. Falls back to null (no history)
+// on a brand-new repo; an existing repo gets its prior 30-day delta.
+export async function computeStarsGained30dByGithubId(
+  githubId: bigint,
+  currentStars: number,
+  now: Date = new Date()
+): Promise<number | null> {
+  const repo = await prisma.repository.findUnique({ where: { githubId }, select: { id: true } });
+  if (!repo) return null;
+  const { starsGained } = await computeStarsGained30d(repo.id, currentStars, now);
+  return starsGained;
+}

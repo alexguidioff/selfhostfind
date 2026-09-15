@@ -14,6 +14,7 @@ import { classify } from '@/lib/classification';
 import { sendAlert, pingHeartbeat } from '@/lib/alerts';
 import { runWithConcurrency } from './concurrency';
 import { buildApplicationUpdate, buildScores, repoItemFromSearch, uniqueSlug, applyManualOverrides, scoreUpdate, SCORE_FIELDS, type RepoItem } from './persist';
+import { computeStarsGained30dByGithubId } from './stars-since';
 
 const MAX_PAGES_PER_QUERY = Number(process.env.DISCOVERY_MAX_PAGES_PER_QUERY ?? 2);
 const CONCURRENCY = Number(process.env.DISCOVERY_CONCURRENCY ?? 3);
@@ -112,14 +113,17 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
     }
 
     await prisma.scan.update({ where: { id: scan.id }, data: { stage: 'score' } });
-    // Discovery runs first, so no prior snapshot exists yet for brand-new repos:
-    // growthScore will be 0 until the snapshot job has at least one full 30-day window.
-    // The Repository id is filled in by the upsert below; we use a placeholder here so
-    // the score payload has the right shape, then re-bind once the row is known.
-    const repo = repoItemFromSearch(item, '');
-    const scores = buildScores({ repo, analysis, classification, starsGained30d: null });
+    // Compute the 30-day growth delta using whatever snapshot history exists. A brand-
+    // new repo returns null (no usable reference) and the score formula treats that
+    // as a 0 growthScore; a rediscovered repo that already has snapshots keeps its
+    // existing value rather than having it zeroed out on every discovery run.
+    const starsGained30d = await computeStarsGained30dByGithubId(BigInt(item.id), item.stargazers_count);
 
     await prisma.scan.update({ where: { id: scan.id }, data: { stage: 'persist' } });
+
+    // Repository id is filled in by the upsert below; we use a placeholder here so
+    // the score payload has the right shape.
+    const repo = repoItemFromSearch(item, '');
 
     const repository = await prisma.repository.upsert({
       where: { githubId: repo.githubId },
@@ -184,6 +188,7 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
       classification,
       existingApplication: existingApp,
     });
+    const scores = buildScores({ repo, analysis, classification, starsGained30d });
     for (const [key, value] of Object.entries(scoreUpdate(scores))) {
       proposed[key] = value;
     }

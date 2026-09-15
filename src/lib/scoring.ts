@@ -1,10 +1,14 @@
 // Composite health score. Weights match the spec:
 //   Recent activity 25%, Recent releases 20%, Docker install 15%, Documentation 15%,
 //   Community 10%, License 5%, NAS compatibility 10%
-// Every sub-score is 0..1 before weighting, 0..100 after. A popular-but-abandoned repo
-// should NOT automatically outrank a small, fresh, well-documented, Compose-ready one —
-// that's why "popularity" isn't part of the weighted health score at all, only its own
-// separate popularityScore field (used for the "popular" sort, not the default one).
+// Every sub-score is 0..1 before weighting, 0..100 after.
+//
+// The community component DOES incorporate stars and forks — the comment that used to
+// say "popularity isn't part of the weighted health score at all" was misleading: it
+// only meant raw stars aren't the only signal, not that popularity is excluded. Stars
+// and forks contribute to the health composite through the community sub-score, while
+// popularityScore and growthScore are tracked as separate axes (used for the "popular"
+// and "trending" sorts, not the default one).
 
 // Bumping this version invalidates old breakdowns: the UI shows "breakdown not yet
 // available" until the next snapshot run re-computes. Kept in lockstep with the migration
