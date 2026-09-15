@@ -80,6 +80,28 @@ export function applyRepoItemDelta(existing: RepoItem, item: GhRepoSearchItem): 
   };
 }
 
+// Maps a ScoringOutput (the in-memory shape returned by computeScores) onto the
+// persisted Application column names. Centralised so discovery, refresh, and snapshot
+// can't drift apart on what gets written where.
+export const SCORE_FIELDS = [
+  'healthScore', 'activityScore', 'documentationScore', 'installEaseScore',
+  'nasCompatibilityScore', 'dockerScore', 'popularityScore', 'growthScore',
+  'scoreBreakdown', 'scoreAlgorithmVersion', 'scoreComputedAt',
+] as const;
+
+export function scoreUpdate(scores: ReturnType<typeof computeScores>): Record<string, unknown> {
+  const { breakdown, algorithmVersion, ...scalars } = scores;
+  // Renames: ScoringOutput's `breakdown`/`algorithmVersion` map to the DB columns
+  // `scoreBreakdown`/`scoreAlgorithmVersion`. Done here so callers don't sprinkle the
+  // mapping in three pipelines.
+  return {
+    ...scalars,
+    scoreBreakdown: breakdown,
+    scoreAlgorithmVersion: algorithmVersion,
+    scoreComputedAt: new Date(),
+  };
+}
+
 export function buildScores(args: {
   repo: RepoItem;
   analysis: AnalysisOutcome;

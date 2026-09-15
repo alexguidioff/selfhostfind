@@ -5,6 +5,8 @@ import { prisma } from '@/lib/db';
 import { computeScores } from '@/lib/scoring';
 import { resolveVerificationStatus } from '@/lib/verification';
 import { sendAlert, pingHeartbeat } from '@/lib/alerts';
+import { scoreUpdate, SCORE_FIELDS } from './persist';
+import { computeStarsGained30d } from './stars-since';
 
 // UTC day boundary, used as the dedupe key for snapshots. Postgres side via the
 // unique index defined in 20260917090000_snapshot_unique_per_day/migration.sql.
@@ -31,29 +33,38 @@ export async function runSnapshot(clock: Clock = realClock): Promise<void> {
   const todayUtc = startOfUtcDay(clock.now());
 
   for (const repo of repos) {
-    // The unique index on (repositoryId, UTC day) means re-running within the same UTC
-    // day replaces today's row rather than appending. We delete first then insert inside
-    // a single transaction so a concurrent snapshot run can't see zero rows momentarily.
-    // Raw SQL is needed because the unique constraint is a functional index on
-    // date_trunc('day', recordedAt) — Prisma's typed upsert can't address it.
-    await prisma.$transaction([
-      prisma.metricSnapshot.deleteMany({
-        where: { repositoryId: repo.id, recordedAt: todayUtc },
-      }),
-      prisma.metricSnapshot.create({
-        data: {
+    // Idempotent upsert on (repositoryId, recordedDay): same UTC day → same row
+    // replaced. The denormalised recordedDay column exists specifically so this is a
+    // typed Prisma upsert, not a delete-then-create dance (delete+create would not
+    // be atomic against a concurrent snapshot run and could lose counts).
+    const recordedDay = new Date(Date.UTC(todayUtc.getUTCFullYear(), todayUtc.getUTCMonth(), todayUtc.getUTCDate()));
+    await prisma.metricSnapshot.upsert({
+      where: {
+        repositoryId_recordedDay: {
           repositoryId: repo.id,
-          stars: repo.stars,
-          forks: repo.forks,
-          openIssues: repo.openIssues,
-          recordedAt: todayUtc,
+          recordedDay,
         },
-      }),
-    ]);
+      },
+      create: {
+        repositoryId: repo.id,
+        stars: repo.stars,
+        forks: repo.forks,
+        openIssues: repo.openIssues,
+        recordedAt: todayUtc,
+        recordedDay,
+      },
+      update: {
+        stars: repo.stars,
+        forks: repo.forks,
+        openIssues: repo.openIssues,
+        recordedAt: todayUtc,
+      },
+    });
 
     if (!repo.application) continue;
 
-    const { starsGained30d, starsGainedSource } = await computeStarsGained30d(repo.id, repo.stars, clock.now());
+    const { starsGained, source: starsGainedSource } = await computeStarsGained30d(repo.id, repo.stars, clock.now());
+    const starsGained30d = starsGained;
     const overrides = (repo.application.manualOverrides as Record<string, boolean> | null) ?? {};
 
     const scores = computeScores({
@@ -87,46 +98,31 @@ export async function runSnapshot(clock: Clock = realClock): Promise<void> {
       unreachable: repo.unreachable,
     });
 
+    // scoreUpdate does the column-name remapping (breakdown → scoreBreakdown, etc.)
+    // and stamps scoreComputedAt; spreading its result gives us a verified-by-types
+    // payload that can't silently write wrong names. Adding verificationStatus and
+    // growthScoreSource last keeps those two outside the override-protection strip
+    // below — the admin UI doesn't expose them, so flagging them manually would be
+    // noise, and silently dropping them on every run would erase provenance.
     const update: Record<string, unknown> = {
-      ...scores,
+      ...scoreUpdate(scores),
       verificationStatus,
-      scoreBreakdown: scores.breakdown,
-      scoreAlgorithmVersion: scores.algorithmVersion,
-      scoreComputedAt: clock.now(),
       // Stash whether growth is real or "not enough history" so the UI can label
       // consistently without re-deriving.
       growthScoreSource: starsGainedSource,
     };
-    for (const key of Object.keys(overrides)) {
+    // Apply manual overrides AFTER all derived fields are merged in. If a score column
+    // is in manualOverrides, the admin's value stands. Breakdown travels with the score
+    // so it follows the same rule.
+    for (const key of [...SCORE_FIELDS, 'verificationStatus', 'growthScoreSource']) {
       if (overrides[key]) delete update[key];
     }
 
-    await prisma.application.update({ where: { id: repo.application.id }, data: update as any });
+    await prisma.application.update({ where: { id: repo.application.id }, data: update as never });
   }
 
   console.log('[snapshot] done');
   await pingHeartbeat();
-}
-
-// 30-day reference: the snapshot closest to 30 days ago, accepted only if it's within
-// 48 hours of the target. Returns null when no usable reference exists so the UI can
-// distinguish "no growth" from "we don't know" (the latter must not surface the app in
-// trending rankings).
-export async function computeStarsGained30d(
-  repositoryId: string,
-  currentStars: number,
-  now: Date
-): Promise<{ starsGained30d: number | null; starsGainedSource: 'computed' | 'insufficient-history' }> {
-  const target = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const toleranceMs = 48 * 60 * 60 * 1000;
-  const min = new Date(target.getTime() - toleranceMs);
-  const max = new Date(target.getTime() + toleranceMs);
-  const reference = await prisma.metricSnapshot.findFirst({
-    where: { repositoryId, recordedAt: { gte: min, lte: max } },
-    orderBy: { recordedAt: 'desc' },
-  });
-  if (!reference) return { starsGained30d: null, starsGainedSource: 'insufficient-history' };
-  return { starsGained30d: currentStars - reference.stars, starsGainedSource: 'computed' };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

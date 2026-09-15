@@ -171,12 +171,14 @@ model MetricSnapshot {
   forks        Int
   openIssues   Int      @default(0)
   recordedAt   DateTime @default(now())
+  // UTC day at midnight, denormalised so the unique index doesn't depend on a
+  // functional index (which has been unreliable to apply on TIMESTAMP without
+  // timezone in earlier migrations of this project). Maintained by the snapshot job.
+  recordedDay  DateTime @db.Date
 
+  @@unique([repositoryId, recordedDay])
   @@index([repositoryId, recordedAt])
-  // Enforced in Postgres as a functional unique index on (repositoryId, UTC day) —
-  // listed in 20260917090000_snapshot_unique_per_day/migration.sql — so re-running the
-  // snapshot job within the same UTC day overwrites the prior snapshot instead of
-  // duplicating it.
+  @@index([recordedDay])
 }
 
 // Daily aggregate of user-submitted searches. Empty unless SEARCH_LOG_ENABLED=true; the

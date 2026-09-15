@@ -24,7 +24,8 @@ import {
 } from '@/lib/github';
 import { analyzeRepository, type AnalysisOutcome } from './analyze';
 import { classify } from '@/lib/classification';
-import { buildApplicationUpdate, buildScores, type RepoItem } from './persist';
+import { buildApplicationUpdate, buildScores, scoreUpdate, SCORE_FIELDS, type RepoItem } from './persist';
+import { computeStarsGained30d } from './stars-since';
 import { runWithConcurrency } from './concurrency';
 import { sendAlert, pingHeartbeat } from '@/lib/alerts';
 import {
@@ -64,11 +65,18 @@ async function pickRepos(max: number, singleRepo: string | null): Promise<Array<
     SELECT id, "githubId", "fullName"
     FROM "Repository"
     WHERE
-      ("lastScannedAt" IS NULL AND ("lastScanAttemptAt" IS NULL OR "lastScanAttemptAt" < ${retryThreshold}))
-      OR ("lastScannedAt" IS NOT NULL AND "lastScannedAt" < ${staleThreshold})
+      -- Both conditions must hold: a repo is eligible iff it's never been scanned OR
+      -- its last successful scan is older than STALE_AFTER_DAYS, AND we haven't
+      -- retried it too recently. The original OR-between-branches forgot the retry
+      -- interval for already-scanned repos; conflating them here keeps the invariant
+      -- "don't hammer a sick repo" true for both kinds of staleness.
+      (("lastScannedAt" IS NULL OR "lastScannedAt" < ${staleThreshold})
+        AND ("lastScanAttemptAt" IS NULL OR "lastScanAttemptAt" < ${retryThreshold}))
     ORDER BY
       CASE WHEN "lastScannedAt" IS NULL THEN 0 ELSE 1 END,
-      COALESCE("lastScannedAt", "lastScanAttemptAt", "1970-01-01") ASC
+      -- '1970-01-01'::timestamp is a real timestamp literal; the bare string version
+      -- was parsed as a column name and would error at runtime.
+      COALESCE("lastScannedAt", "lastScanAttemptAt", '1970-01-01'::timestamp) ASC
     LIMIT ${max}
   `;
 }
@@ -105,7 +113,10 @@ async function refreshOne(repo: { id: string; githubId: bigint; fullName: string
       });
 
       const item = lookup.repo;
-      const starsGained30d = await computeStarsGained30d(repo.id, existing.stars);
+      // Use the freshly-fetched GitHub stars, not the DB row. The old code used
+      // existing.stars, which meant the growth delta was computed against stale data
+      // whenever the user looked at the catalog between runs. This is the delta we want.
+      const { starsGained: starsGained30d } = await computeStarsGained30d(repo.id, item.stargazers_count);
 
       const analysis = await analyzeRepository(item.owner.login, item.name, item.default_branch);
       const classification = classify({
@@ -151,10 +162,18 @@ async function refreshOne(repo: { id: string; githubId: bigint; fullName: string
           classification,
           existingApplication: existing.application,
         });
-        // Merge scores into the update. buildApplicationUpdate does not include scores
-        // because discover sets them separately; here we want to commit both together
-        // so the partial-update path doesn't leave scoring stale.
-        for (const [k, v] of Object.entries(scores)) update[k] = v;
+        // Merge scores via the central scoreUpdate mapping (renames breakdown/
+        // algorithmVersion to their persisted column names, stamps scoreComputedAt).
+        // Going through Object.entries(scores) directly would write `breakdown` and
+        // `algorithmVersion` — columns that don't exist on Application — silently
+        // swallowed by `as never`.
+        for (const [k, v] of Object.entries(scoreUpdate(scores))) update[k] = v;
+        // Strip any score column the admin marked as manual; the breakdown travels
+        // with the score, so it goes manual too.
+        for (const key of SCORE_FIELDS) {
+          const overrideFlags = (existing.application.manualOverrides as Record<string, boolean> | null) ?? {};
+          if (overrideFlags[key]) delete update[key];
+        }
 
         if (dryRun) {
           return {
@@ -206,22 +225,8 @@ async function refreshOne(repo: { id: string; githubId: bigint; fullName: string
   }
 }
 
-// Pulls the snapshot closest to ~30 days ago (with a 48-hour tolerance) and returns the
-// stars delta. Returns null when no usable reference exists: we must NOT pretend the
-// growth is zero when the truth is "we don't have enough history yet" (see plan §3).
-async function computeStarsGained30d(repositoryId: string, currentStars: number): Promise<number | null> {
-  const now = new Date();
-  const target = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const toleranceMs = 48 * 60 * 60 * 1000;
-  const min = new Date(target.getTime() - toleranceMs);
-  const max = new Date(target.getTime() + toleranceMs);
-  const reference = await prisma.metricSnapshot.findFirst({
-    where: { repositoryId, recordedAt: { gte: min, lte: max } },
-    orderBy: { recordedAt: 'desc' },
-  });
-  if (!reference) return null;
-  return currentStars - reference.stars;
-}
+// starsGained30d lives in ./stars-since.ts; refresh uses that shared helper so the
+// 30-day delta definition can't drift between the snapshot and refresh pipelines.
 
 async function insertNewApplication(args: {
   repo: RepoItem;
@@ -234,7 +239,7 @@ async function insertNewApplication(args: {
     repo, analysis, classification,
     existingApplication: null,
   });
-  for (const [k, v] of Object.entries(scores)) update[k] = v;
+  for (const [k, v] of Object.entries(scoreUpdate(scores))) update[k] = v;
   const { uniqueSlug } = await import('./persist');
   const slug = await uniqueSlug(prisma, repo.name);
   await prisma.application.create({

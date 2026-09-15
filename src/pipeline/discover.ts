@@ -13,7 +13,7 @@ import { analyzeRepository, type AnalysisResult } from './analyze';
 import { classify } from '@/lib/classification';
 import { sendAlert, pingHeartbeat } from '@/lib/alerts';
 import { runWithConcurrency } from './concurrency';
-import { buildApplicationUpdate, buildScores, repoItemFromSearch, uniqueSlug, applyManualOverrides, type RepoItem } from './persist';
+import { buildApplicationUpdate, buildScores, repoItemFromSearch, uniqueSlug, applyManualOverrides, scoreUpdate, SCORE_FIELDS, type RepoItem } from './persist';
 
 const MAX_PAGES_PER_QUERY = Number(process.env.DISCOVERY_MAX_PAGES_PER_QUERY ?? 2);
 const CONCURRENCY = Number(process.env.DISCOVERY_CONCURRENCY ?? 3);
@@ -173,13 +173,30 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
 
     const existingApp = await prisma.application.findUnique({ where: { repositoryId: repository.id } });
 
+    // Apply manual overrides AFTER scores are merged in, not before — otherwise the
+    // override-protection pass would strip scores that were just written, and a
+    // manually-corrected healthScore would silently revert to an automated one.
+    // buildApplicationUpdate already protects its own fields; scores need the same
+    // treatment but with their own key set.
     const proposed = buildApplicationUpdate({
       repo,
       analysis,
       classification,
       existingApplication: existingApp,
     });
-    Object.assign(proposed, scores);
+    for (const [key, value] of Object.entries(scoreUpdate(scores))) {
+      proposed[key] = value;
+    }
+    // Strip any score fields the admin marked as manual. The breakdown and
+    // algorithmVersion travel with the score so the UI can explain it; mark them
+    // manual too so a forced recalc doesn't show a stale breakdown next to a current
+    // override.
+    const overrides = (existingApp?.manualOverrides as Record<string, boolean> | null) ?? {};
+    for (const key of SCORE_FIELDS) {
+      if (overrides[key]) {
+        delete proposed[key];
+      }
+    }
 
     await prisma.application.upsert({
       where: { repositoryId: repository.id },

@@ -55,5 +55,8 @@ export async function POST(req: Request) {
   }
 
   const outcome = await recordSearch({ query: q, params });
-  return NextResponse.json({ ok: outcome.recorded, reason: outcome.reason }, { status: 204 });
+  // 204 No Content must have an empty body per RFC 9110; NextResponse.json builds a JSON
+  // payload which would throw. Use a 200 with the (small) JSON body instead so the client
+  // can inspect the result without parsing errors.
+  return NextResponse.json({ ok: outcome.recorded, reason: outcome.reason });
 }
