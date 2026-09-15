@@ -179,6 +179,22 @@ model MetricSnapshot {
   // duplicating it.
 }
 
+// Daily aggregate of user-submitted searches. Empty unless SEARCH_LOG_ENABLED=true; the
+// retention job prunes rows older than 30 days (see lib/maintenance.ts).
+model SearchAggregate {
+  id                String   @id @default(cuid())
+  dayUtc            DateTime
+  normalizedQuery   String
+  filterSignature   String
+  searchCount       Int      @default(0)
+  zeroResultCount   Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([dayUtc, normalizedQuery, filterSignature])
+  @@index([dayUtc])
+}
+
 // One row per pipeline run against a single repository. Gives us an audit trail of
 // why a repo was included/excluded, and lets re-runs stay idempotent (upsert by githubId).
 model Scan {

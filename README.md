@@ -279,6 +279,39 @@ end-to-end. Deferred:
 - Additional sources beyond GitHub (Codeberg, GitLab, Docker registries) — `Repository.source`
   already exists as a field for this.
 
+## Suggesting an application or reporting an error
+
+Two GitHub Issues templates live under `.github/ISSUE_TEMPLATE/`. The catalog grid's
+empty state exposes **"Suggest an app"**, the application detail page exposes
+**"Report an error"**. Both open the upstream repo's `/issues/new` page with the
+template pre-filled — no API token, no ticket store, no server-side issue creation.
+
+`NEXT_PUBLIC_REPORT_REPO` (default `alexguidioff/selfhostfind`) controls which repo the
+links point at. Requires GitHub Issues to be enabled on that repository.
+
+## Search logs (zero-result aggregates)
+
+`SEARCH_LOG_ENABLED=true` turns on opt-in logging of zero-result searches. Off by default.
+When enabled, `SearchBar.tsx` fires a POST to `/api/search-log` on each explicit form
+submit; the server re-runs the same query against the catalog to determine whether the
+search actually returned zero results, then increments a daily aggregate row. Events are
+strictly opt-in: typing, prefetch, pagination, and changes to filters alone do not
+increment.
+
+The server never sees the IP, user-agent, cookie, referrer, session id, or full request
+path. Queries longer than 100 characters, emails, URLs, deep paths, and known secret
+patterns (GitHub PATs, Slack tokens, OpenAI keys) are dropped before normalization.
+Filter values are validated against the same allowlist the catalog uses.
+
+`/admin/search-stats` (admin-authenticated) shows the last 30 days aggregated by
+normalized query and filter signature, split between unfiltered and filtered searches
+because a filter mismatch is a different signal than a catalog gap. Rows are pruned by
+the backup/maintenance job (`scripts/backup.sh`, `SEARCH_LOG_RETENTION_DAYS`, default 30).
+
+`SEARCH_LOG_RATE_PER_MINUTE` (default 60) sets a process-wide conservative cap on writes
+per minute. The counter is in-memory, scoped to the Next.js process — fine for the
+single-instance deployment this project targets.
+
 ## Data honesty
 
 Every automatically-discovered application starts as `Unverified`. Classification results

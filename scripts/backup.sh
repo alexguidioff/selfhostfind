@@ -104,6 +104,14 @@ echo "[backup] restore verification OK ($ROW_COUNT repository rows)"
 # script's — see README "Backups" for a one-line rsync/rclone example.
 find "$BACKUP_DIR" -name 'selfhostfind-*.sql.gz' -mtime "+$RETENTION_DAYS" -print -delete
 
+# Prune search-aggregate rows older than 30 days. Same retention policy the README
+# documents for SearchAggregate; the search-stats admin view keys off "last 30 days" so
+# longer rows would only take space. No-op when SEARCH_LOG_ENABLED=false (the table will
+# be empty either way, but the WHERE is harmless).
+SEARCH_LOG_RETENTION_DAYS="${SEARCH_LOG_RETENTION_DAYS:-30}"
+PRUNED=$(psql "$DATABASE_URL" -tAc "WITH d AS (DELETE FROM \"SearchAggregate\" WHERE \"dayUtc\" < NOW() - (INTERVAL '$SEARCH_LOG_RETENTION_DAYS days') RETURNING 1) SELECT count(*) FROM d;" 2>/dev/null || echo "?")
+echo "[backup] pruned $PRUNED search-aggregate rows older than $SEARCH_LOG_RETENTION_DAYS days"
+
 if [ -n "${BACKUP_HEARTBEAT_URL:-}" ]; then
   wget -q -T 10 -O /dev/null "$BACKUP_HEARTBEAT_URL" || true
 fi

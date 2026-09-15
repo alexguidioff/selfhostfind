@@ -28,7 +28,15 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <SignOutButton />
       </div>
 
-      <p className="text-sm mb-4"><Link href={pendingOnly ? '/admin?review=all' : '/admin'} className="underline">{pendingOnly ? 'Show all applications' : 'Show pending review'}</Link> · Showing up to 100 applications; reviewed apps leave the pending queue.</p>
+      <p className="text-sm mb-4">
+        <Link href={pendingOnly ? '/admin?review=all' : '/admin'} className="underline">
+          {pendingOnly ? 'Show all applications' : 'Show pending review'}
+        </Link>
+        {' · '}
+        <Link href="/admin/search-stats" className="underline">Search stats (zero-result)</Link>
+        {' · '}
+        Showing up to 100 applications; reviewed apps leave the pending queue.
+      </p>
       <div className="space-y-2">
         {apps.map((app) => (
           <AdminAppRow key={app.id} app={app} />

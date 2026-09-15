@@ -16,8 +16,18 @@ export function SearchBar() {
     e.preventDefault();
     const next = new URLSearchParams(params.toString());
     next.delete('page');
-    if (value.trim()) next.set('q', value.trim());
+    const trimmed = value.trim();
+    if (trimmed) next.set('q', trimmed);
     else next.delete('q');
+    // Fire-and-forget search-log POST. We deliberately do not await it: the navigation
+    // must not be delayed by logging, and a server error must not block the search.
+    // The server-side guard (SEARCH_LOG_ENABLED=false) returns 204 immediately anyway.
+    void fetch('/api/search-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: trimmed, filters: filterParams(params) }),
+      keepalive: true,
+    }).catch(() => { /* logging failure never blocks navigation */ });
     router.push(`${pathname}?${next.toString()}`);
   }
 
@@ -34,4 +44,17 @@ export function SearchBar() {
       />
     </form>
   );
+}
+
+// Returns just the filters the search-log API cares about. Whitelisting here avoids
+// accidentally including ?sort= or ?page= in the stored signature — those don't change
+// what's in the catalog, only how results are ordered, so they aren't a signal.
+const LOGGED_FILTER_KEYS = ['category', 'docker', 'compose', 'arm64', 'nas', 'verified', 'database', 'minStars', 'updated'];
+function filterParams(params: URLSearchParams): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of LOGGED_FILTER_KEYS) {
+    const v = params.get(key);
+    if (v) out[key] = v;
+  }
+  return out;
 }
