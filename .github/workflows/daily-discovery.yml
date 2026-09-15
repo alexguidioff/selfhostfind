@@ -80,3 +80,14 @@ jobs:
           ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
           HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
         run: pnpm snapshot
+
+      - name: Prune search-aggregate retention window
+        # Mirror of the retention step in scripts/backup.sh so deployments that only
+        # run via GitHub Actions (no scheduled backup job on the host) still get the
+        # 30-day window the admin view relies on.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          PGPASSWORD=$(echo "$DATABASE_URL" | sed -E 's|.*://[^:]+:([^@]+)@.*|\1|') \
+          psql "$DATABASE_URL" -tAc "WITH d AS (DELETE FROM \"SearchAggregate\" WHERE \"dayUtc\" < NOW() - INTERVAL '30 days' RETURNING 1) SELECT count(*) FROM d;"
+        continue-on-error: true

@@ -18,24 +18,29 @@ describe('looksSensitive', () => {
     expect(looksSensitive('self hosted notes')).toBe(false);
   });
 
-  it('rejects emails', () => {
+  it('rejects emails anywhere in the text, not only at the start', () => {
     expect(looksSensitive('foo@example.com')).toBe(true);
     expect(looksSensitive('a.b+tag@sub.example.org')).toBe(true);
+    expect(looksSensitive('contact me at foo@bar.com please')).toBe(true);
   });
 
-  it('rejects URLs', () => {
+  it('rejects URLs anywhere in the text, not only at the start', () => {
     expect(looksSensitive('https://example.com/foo')).toBe(true);
     expect(looksSensitive('http://localhost')).toBe(true);
+    expect(looksSensitive('see https://docs.example.com/api for details')).toBe(true);
   });
 
-  it('rejects deep paths', () => {
+  it('rejects deep paths anywhere in the text', () => {
     expect(looksSensitive('/var/log/app/foo/bar')).toBe(true);
+    expect(looksSensitive('my config is at /etc/myapp/config.json')).toBe(true);
   });
 
-  it('rejects secret-looking tokens', () => {
+  it('rejects secret-looking tokens even with a leading word', () => {
     expect(looksSensitive('ghp_abcdefghijklmnopqrstuvwxyz0123456789')).toBe(true);
     expect(looksSensitive('sk-1234567890abcdefghij')).toBe(true);
     expect(looksSensitive('xoxb-1234567890-12345')).toBe(true);
+    // The "here is my token ghp_..." shape used to slip past the anchored regex.
+    expect(looksSensitive('here is my token ghp_abcdefghijklmnopqrstuvwxyz0123456789 for safekeeping')).toBe(true);
   });
 });
 

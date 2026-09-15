@@ -30,14 +30,18 @@ function underRateLimit(now: number): boolean {
   return true;
 }
 
-// Patterns the search itself should never log: an email would be PII, a URL is the
-// catalog itself, a file path or a secret-looking token carries information the user did
-// not intend to share.
+// Patterns the search itself should never log. None of these are anchored at the start:
+// "my email is foo@bar.com" or "see https://example.com" still trigger, because the
+// secret-looking substring inside otherwise-benign text is what we want to drop. A pure
+// substring match is what the privacy contract calls for; an anchored regex would miss
+// the very common "see <URL>" or "my secret is <token>" phrasing. False positives
+// (legitimate words containing these patterns) are accepted as a cost of the safer
+// default.
 const DROP_PATTERNS: RegExp[] = [
-  /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i, // email
-  /^https?:\/\//i,                           // URL
-  /^\/[^/]+(\/[^/]+){2,}/,                    // absolute-ish path with 2+ segments
-  /^(gh[opr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|xox[bpoas]-[A-Za-z0-9-]{10,})/i, // github/slack/openai tokens
+  /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i,                                         // email
+  /https?:\/\/[^\s<>"']+/i,                                                          // URL anywhere
+  /(?:^|\s)\/[a-z0-9._-]+(?:\/[a-z0-9._-]+){2,}/i,                                  // absolute-ish path
+  /\b(?:gh[opr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,}|xox[bpoas]-[A-Za-z0-9-]{10,})\b/i, // secret tokens
 ];
 
 export function looksSensitive(value: string): boolean {
@@ -45,6 +49,14 @@ export function looksSensitive(value: string): boolean {
   if (!v) return true;
   if (v.length > MAX_QUERY_LENGTH) return true;
   return DROP_PATTERNS.some((re) => re.test(v));
+}
+
+// Bounds-check the raw byte length of a request body. The Content-Length header can
+// be absent (chunked) or lie, so the route also measures TextEncoder output on the
+// already-parsed body. This helper is just the upper-bound precheck.
+export function exceedsByteLimit(value: string, maxBytes: number): boolean {
+  // TextEncoder gives the UTF-8 byte length (browsers' fetch uses UTF-8 over the wire).
+  return new TextEncoder().encode(value).byteLength > maxBytes;
 }
 
 // The list of categories the catalog exposes; derived here so a new category added in
@@ -108,6 +120,7 @@ export function isEnabled(): boolean {
 export interface LogInput {
   query: string;
   params: SearchParams;
+  context?: string | null;
 }
 
 export interface LogOutcome {
@@ -115,9 +128,16 @@ export interface LogOutcome {
   reason?: string;
 }
 
+const ALLOWED_CONTEXTS_FOR_LOG = new Set(['home', 'category', 'alternatives', 'app', 'other']);
+
+function validateContext(value: unknown): string {
+  if (typeof value !== 'string') return 'other';
+  return ALLOWED_CONTEXTS_FOR_LOG.has(value) ? value : 'other';
+}
+
 // Returns true if the row was inserted/updated. Failures are swallowed and logged as a
 // warning: a broken search-log endpoint must NEVER break navigation.
-export async function recordSearch({ query, params }: LogInput): Promise<LogOutcome> {
+export async function recordSearch({ query, params, context }: LogInput): Promise<LogOutcome> {
   if (!isEnabled()) return { recorded: false, reason: 'disabled' };
   const normalized = normalizeSearch(query);
   if (looksSensitive(query) || looksSensitive(normalized)) {
@@ -130,6 +150,7 @@ export async function recordSearch({ query, params }: LogInput): Promise<LogOutc
   if (!underRateLimit(now)) return { recorded: false, reason: 'rate-limited' };
 
   const signature = filterSignature(params);
+  const safeContext = validateContext(context);
   const dayUtc = startOfUtcDay(new Date(now));
 
   try {
@@ -150,9 +171,9 @@ export async function recordSearch({ query, params }: LogInput): Promise<LogOutc
     // Atomic increment: $queryRaw with ON CONFLICT keeps both counters consistent even
     // when two requests land in the same millisecond.
     await prisma.$executeRaw`
-      INSERT INTO "SearchAggregate" (id, "dayUtc", "normalizedQuery", "filterSignature",
+      INSERT INTO "SearchAggregate" (id, "dayUtc", "normalizedQuery", "filterSignature", "context",
                                       "searchCount", "zeroResultCount", "createdAt", "updatedAt")
-      VALUES (gen_random_uuid()::text, ${dayUtc}, ${normalized}, ${signature},
+      VALUES (gen_random_uuid()::text, ${dayUtc}, ${normalized}, ${signature}, ${safeContext},
               1, ${zeroResult ? 1 : 0}, NOW(), NOW())
       ON CONFLICT ("dayUtc", "normalizedQuery", "filterSignature") DO UPDATE
         SET "searchCount" = "SearchAggregate"."searchCount" + 1,

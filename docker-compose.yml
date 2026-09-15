@@ -52,6 +52,12 @@ services:
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
       ALERT_WEBHOOK_FORMAT: ${ALERT_WEBHOOK_FORMAT:-generic}
       HEARTBEAT_URL: ${HEARTBEAT_URL:-}
+      # Phase 5 search logging. Set SEARCH_LOG_ENABLED=true to enable (default off).
+      # NEXT_PUBLIC_ mirror is read at build time to suppress the client-side fetch.
+      SEARCH_LOG_ENABLED: ${SEARCH_LOG_ENABLED:-false}
+      NEXT_PUBLIC_SEARCH_LOG_ENABLED: ${SEARCH_LOG_ENABLED:-false}
+      SEARCH_LOG_RATE_PER_MINUTE: ${SEARCH_LOG_RATE_PER_MINUTE:-60}
+      NEXT_PUBLIC_REPORT_REPO: ${NEXT_PUBLIC_REPORT_REPO:-alexguidioff/selfhostfind}
       NODE_ENV: production
     ports:
       - "${PORT:-3000}:3000"

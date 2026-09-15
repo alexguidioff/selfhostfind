@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { recordSearch } from '@/lib/search-log';
+import { recordSearch, exceedsByteLimit } from '@/lib/search-log';
 import { type SearchParams } from '@/lib/query';
 
 export const dynamic = 'force-dynamic';
@@ -13,15 +13,23 @@ export const runtime = 'nodejs';
 const MAX_BODY_BYTES = 4 * 1024;
 
 export async function POST(req: Request) {
-  // Same-origin only: requests carrying the Origin header (browsers do, fetch() does)
-  // must point back at us. Direct curl from a workstation is allowed (no Origin header)
-  // because the rate limit + sensitive-pattern filter already keep it bounded.
+  // Disabled? Refuse to do any work, including parsing the body, so a probe against
+  // a misconfigured deploy can't even inflate metrics.
+  if (process.env.SEARCH_LOG_ENABLED !== 'true') {
+    return new NextResponse(null, { status: 204 });
+  }
+
+  // Same-origin only when the Origin header is present (browsers send it, fetch
+  // doesn't always). Curl from a workstation with no Origin header is allowed because
+  // the rate limit + sensitive-pattern filter still keep it bounded. The previous
+  // version compared hosts only — checking scheme too avoids Origin: https://evil.com
+  // leaking via mixed-content redirects on shared domains.
   const origin = req.headers.get('origin');
   if (origin) {
     try {
       const here = new URL(req.url);
       const o = new URL(origin);
-      if (o.host !== here.host) {
+      if (o.host !== here.host || o.protocol !== here.protocol) {
         return NextResponse.json({ error: 'cross-origin' }, { status: 403 });
       }
     } catch {
@@ -29,32 +37,48 @@ export async function POST(req: Request) {
     }
   }
 
-  // Cap the body so a malicious client can't make us process a multi-megabyte blob.
+  // Reject based on declared Content-Length first — saves reading a giant body.
+  // Chunked transfers come through without this header; we still re-check the body
+  // length after reading.
   const contentLength = Number(req.headers.get('content-length') ?? '0');
   if (contentLength > MAX_BODY_BYTES) {
     return NextResponse.json({ error: 'payload too large' }, { status: 413 });
   }
 
-  let payload: { q?: unknown; filters?: Record<string, unknown> };
+  let raw = '';
   try {
-    const text = await req.text();
-    if (text.length > MAX_BODY_BYTES) {
-      return NextResponse.json({ error: 'payload too large' }, { status: 413 });
-    }
-    payload = text ? JSON.parse(text) : {};
+    raw = await req.text();
   } catch {
-    return NextResponse.json({ error: 'invalid json' }, { status: 400 });
+    return NextResponse.json({ error: 'invalid request' }, { status: 400 });
+  }
+  if (exceedsByteLimit(raw, MAX_BODY_BYTES)) {
+    return NextResponse.json({ error: 'payload too large' }, { status: 413 });
   }
 
-  const q = typeof payload.q === 'string' ? payload.q : '';
-  const filters = payload.filters && typeof payload.filters === 'object' ? payload.filters : {};
-  // We accept only string values here; the catalog validation lives in lib/search-log.ts.
+  let payload: unknown;
+  if (raw.length > 0) {
+    try { payload = JSON.parse(raw); } catch { return NextResponse.json({ error: 'invalid json' }, { status: 400 }); }
+  }
+  // The endpoint accepts only an object payload. null / numbers / strings are rejected
+  // explicitly to avoid the previous "payload.q on null" TypeError.
+  if (payload !== undefined && (typeof payload !== 'object' || payload === null || Array.isArray(payload))) {
+    return NextResponse.json({ error: 'invalid payload' }, { status: 400 });
+  }
+  const obj = (payload ?? {}) as { q?: unknown; filters?: unknown; context?: unknown };
+
+  const q = typeof obj.q === 'string' ? obj.q : '';
+  const filters = obj.filters && typeof obj.filters === 'object' && !Array.isArray(obj.filters)
+    ? obj.filters : {};
   const params: SearchParams = {};
-  for (const [k, v] of Object.entries(filters)) {
+  for (const [k, v] of Object.entries(filters as Record<string, unknown>)) {
     if (typeof v === 'string') params[k] = v;
   }
 
-  const outcome = await recordSearch({ query: q, params });
+  const outcome = await recordSearch({
+    query: q,
+    params,
+    context: typeof obj.context === 'string' ? obj.context : null,
+  });
   // 204 No Content must have an empty body per RFC 9110; NextResponse.json builds a JSON
   // payload which would throw. Use a 200 with the (small) JSON body instead so the client
   // can inspect the result without parsing errors.

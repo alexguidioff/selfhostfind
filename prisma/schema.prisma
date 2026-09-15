@@ -188,6 +188,10 @@ model SearchAggregate {
   dayUtc            DateTime
   normalizedQuery   String
   filterSignature   String
+  // Page context (home / category / alternatives / app / other). Same bucketing as
+  // the visitor-facing SearchBar.tsx; the server allowlists values so a malicious
+  // client can't store arbitrary tags here.
+  context           String   @default("other")
   searchCount       Int      @default(0)
   zeroResultCount   Int      @default(0)
   createdAt         DateTime @default(now())
