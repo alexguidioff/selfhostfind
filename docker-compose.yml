@@ -95,6 +95,31 @@ services:
     command: ["pnpm", "snapshot"]
     profiles: ["jobs"]
 
+  # Re-analyzes repositories already in the catalog (README changed, license swapped, etc.).
+  # Sits between discover and snapshot in the daily schedule. Use --dry-run for a free
+  # preview. Run manually with: docker compose run --rm refresh
+  # or: docker compose run --rm refresh --dry-run --repo owner/name
+  refresh:
+    build:
+      context: .
+      target: worker
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-selfhostfind}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-selfhostfind}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      REFRESH_CONCURRENCY: ${REFRESH_CONCURRENCY:-2}
+      REFRESH_MAX_REPOS: ${REFRESH_MAX_REPOS:-50}
+      REFRESH_STALE_DAYS: ${REFRESH_STALE_DAYS:-7}
+      REFRESH_CLAIM_TTL_MS: ${REFRESH_CLAIM_TTL_MS:-600000}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_FORMAT: ${ALERT_WEBHOOK_FORMAT:-generic}
+      HEARTBEAT_URL: ${HEARTBEAT_URL:-}
+      NODE_ENV: production
+    command: ["pnpm", "refresh"]
+    profiles: ["jobs"]
+
   # Looks every catalog repo up by its immutable GitHub ID to catch renames/archival/deletion
   # that discovery search can never see on its own (see pipeline/reconcile.ts). Run this
   # before `snapshot` so verification-status re-evaluation sees fresh archived/pushedAt data.

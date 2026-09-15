@@ -10,12 +10,10 @@ import { searchRepositories, type GhRepoSearchItem } from '@/lib/github';
 import { buildDiscoveryQueries, labelForQuery } from './queries';
 import { prefilterRepository } from './prefilter';
 import { analyzeRepository, type AnalysisResult } from './analyze';
-import { classify, classificationFields } from '@/lib/classification';
-import { computeScores } from '@/lib/scoring';
-import { resolveVerificationStatus } from '@/lib/verification';
+import { classify } from '@/lib/classification';
 import { sendAlert, pingHeartbeat } from '@/lib/alerts';
-import { slugify } from '@/lib/slug';
 import { runWithConcurrency } from './concurrency';
+import { buildApplicationUpdate, buildScores, repoItemFromSearch, uniqueSlug, applyManualOverrides, type RepoItem } from './persist';
 
 const MAX_PAGES_PER_QUERY = Number(process.env.DISCOVERY_MAX_PAGES_PER_QUERY ?? 2);
 const CONCURRENCY = Number(process.env.DISCOVERY_CONCURRENCY ?? 3);
@@ -95,7 +93,7 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
     const classification = classify({
       name: item.name,
       description: item.description ?? '',
-      readme: analysis.readmeFull ?? '',
+      readme: analysis.result.readmeFull ?? '',
       topics: item.topics,
     });
 
@@ -107,148 +105,90 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
           completedAt: new Date(),
           included: false,
           reason: `classifier: not a self-hosted application (confidence ${classification.confidence})`,
-          extractedData: { analysis: trimForJson(analysis), classification } as unknown as Prisma.InputJsonValue,
+          extractedData: { analysis: trimForJson(analysis.result), classification } as unknown as Prisma.InputJsonValue,
         },
       });
       return 'ok';
     }
 
     await prisma.scan.update({ where: { id: scan.id }, data: { stage: 'score' } });
-    const scores = computeScores({
-      pushedAt: new Date(item.pushed_at),
-      latestReleaseAt: analysis.latestReleaseAt,
-      dockerfilePresent: analysis.dockerfilePresent,
-      composePresent: analysis.composePresent,
-      readmeLength: analysis.readmeFull?.length ?? 0,
-      hasDocumentationUrl: Boolean(analysis.documentationUrl),
-      hasScreenshots: analysis.screenshotUrls.length > 0,
-      stars: item.stargazers_count,
-      forks: item.forks_count,
-      license,
-      nasFriendly: classification.nasFriendly,
-      arm64Supported: analysis.arm64Supported,
-      databases: analysis.databases,
-      starsGained30d: null, // filled in by trending job once snapshots exist
-    });
+    // Discovery runs first, so no prior snapshot exists yet for brand-new repos:
+    // growthScore will be 0 until the snapshot job has at least one full 30-day window.
+    // The Repository id is filled in by the upsert below; we use a placeholder here so
+    // the score payload has the right shape, then re-bind once the row is known.
+    const repo = repoItemFromSearch(item, '');
+    const scores = buildScores({ repo, analysis, classification, starsGained30d: null });
 
     await prisma.scan.update({ where: { id: scan.id }, data: { stage: 'persist' } });
 
     const repository = await prisma.repository.upsert({
-      where: { githubId: BigInt(item.id) },
+      where: { githubId: repo.githubId },
       create: {
-        githubId: BigInt(item.id),
-        owner: item.owner.login,
-        name: item.name,
-        fullName,
-        description: item.description,
-        repositoryUrl: item.html_url,
-        homepageUrl: item.homepage || null,
-        stars: item.stargazers_count,
-        forks: item.forks_count,
-        watchers: item.watchers_count,
-        openIssues: item.open_issues_count,
-        license,
-        primaryLanguage: item.language,
-        languages: analysis.languages ?? undefined,
-        topics: item.topics,
-        readmeExcerpt: analysis.readmeExcerpt,
-        createdAt: new Date(item.created_at),
-        pushedAt: new Date(item.pushed_at),
-        latestReleaseAt: analysis.latestReleaseAt,
-        latestReleaseTag: analysis.latestReleaseTag,
-        archived: item.archived,
-        fork: item.fork,
-        defaultBranch: item.default_branch,
+        githubId: repo.githubId,
+        owner: repo.fullName.split('/')[0],
+        name: repo.name,
+        fullName: repo.fullName,
+        description: repo.description,
+        repositoryUrl: repo.repositoryUrl,
+        homepageUrl: repo.homepageUrl,
+        stars: repo.stars,
+        forks: repo.forks,
+        watchers: repo.watchers,
+        openIssues: repo.openIssues,
+        license: repo.license,
+        primaryLanguage: repo.primaryLanguage,
+        languages: analysis.result.languages ?? undefined,
+        topics: repo.topics,
+        readmeExcerpt: analysis.result.readmeExcerpt,
+        createdAt: repo.createdAt,
+        pushedAt: repo.pushedAt,
+        latestReleaseAt: analysis.result.latestReleaseAt,
+        latestReleaseTag: analysis.result.latestReleaseTag,
+        archived: repo.archived,
+        fork: repo.fork,
+        defaultBranch: repo.defaultBranch,
         discoverySource: [...sources],
         lastScannedAt: new Date(),
       },
       update: {
-        description: item.description,
-        homepageUrl: item.homepage || null,
-        stars: item.stargazers_count,
-        forks: item.forks_count,
-        watchers: item.watchers_count,
-        openIssues: item.open_issues_count,
-        license,
-        primaryLanguage: item.language,
-        languages: analysis.languages ?? undefined,
-        topics: item.topics,
-        readmeExcerpt: analysis.readmeExcerpt,
-        pushedAt: new Date(item.pushed_at),
-        latestReleaseAt: analysis.latestReleaseAt,
-        latestReleaseTag: analysis.latestReleaseTag,
-        archived: item.archived,
+        description: repo.description,
+        homepageUrl: repo.homepageUrl,
+        stars: repo.stars,
+        forks: repo.forks,
+        watchers: repo.watchers,
+        openIssues: repo.openIssues,
+        license: repo.license,
+        primaryLanguage: repo.primaryLanguage,
+        languages: analysis.result.languages ?? undefined,
+        topics: repo.topics,
+        readmeExcerpt: analysis.result.readmeExcerpt,
+        pushedAt: repo.pushedAt,
+        latestReleaseAt: analysis.result.latestReleaseAt,
+        latestReleaseTag: analysis.result.latestReleaseTag,
+        archived: repo.archived,
         discoverySource: { push: [...sources] },
         lastScannedAt: new Date(),
       },
     });
 
     const existingApp = await prisma.application.findUnique({ where: { repositoryId: repository.id } });
-    const overrides = (existingApp?.manualOverrides as Record<string, boolean> | null) ?? {};
 
-    const dockerSupported = analysis.dockerfilePresent || analysis.composePresent;
-
-    // Re-evaluated every run, in both directions: a project that later goes stale or drops
-    // Docker support loses its auto-verified badge without anyone having to notice. A
-    // manually-verified status is never touched (see resolveVerificationStatus).
-    const verificationStatus = resolveVerificationStatus({
-      currentStatus: existingApp?.verificationStatus ?? 'UNVERIFIED',
-      classificationConfidence: classification.confidence,
-      reviewReasons: classification.reviewReasons,
-      category: classification.category,
-      license,
-      dockerSupported,
-      composeSupported: analysis.composePresent,
-      hasReadme: Boolean(analysis.readmeFull && analysis.readmeFull.length > 100),
-      pushedAt: new Date(item.pushed_at),
-      archived: item.archived, // always false here in practice — prefilter already rejects archived repos
+    const proposed = buildApplicationUpdate({
+      repo,
+      analysis,
+      classification,
+      existingApplication: existingApp,
     });
-
-    const proposed = {
-      ...classificationFields(classification),
-      name: item.name,
-      shortDescription: item.description,
-      isSelfHosted: classification.isSelfHostedApp,
-      dockerSupported,
-      composeSupported: analysis.composePresent,
-      composePath: analysis.composePath,
-      fieldSources: {
-        ...((existingApp?.fieldSources as Record<string, string> | null) ?? {}),
-        category: 'keyword-rules', subcategory: 'keyword-rules', alternativesTo: 'keyword-rules',
-        dockerSupported: 'repository-files', composeSupported: 'repository-files',
-        arm64Supported: 'readme-mention', amd64Supported: 'readme-mention',
-        databases: 'readme-mention', ports: 'readme-scan', isNasFriendly: 'keyword-rules',
-      },
-      arm64Supported: analysis.arm64Supported,
-      amd64Supported: analysis.amd64Supported,
-      databases: analysis.databases,
-      installMethods: analysis.installMethods,
-      envVars: analysis.envVars,
-      ports: analysis.ports,
-      containerImage: analysis.containerImage,
-      documentationUrl: analysis.documentationUrl,
-      demoUrl: analysis.demoUrl,
-      screenshotUrls: analysis.screenshotUrls,
-      verificationStatus,
-      ...scores,
-    } as Record<string, unknown>;
-
-    // Never overwrite fields a human has manually corrected.
-    for (const key of Object.keys(overrides)) {
-      if (overrides[key]) {
-        delete proposed[key];
-        (proposed.fieldSources as Record<string, string>)[key] = 'manual';
-      }
-    }
+    Object.assign(proposed, scores);
 
     await prisma.application.upsert({
       where: { repositoryId: repository.id },
       create: {
         repositoryId: repository.id,
-        slug: await uniqueSlug(item.name),
+        slug: await uniqueSlug(prisma, repo.name),
         ...proposed,
-      } as any,
-      update: proposed as any,
+      } as never,
+      update: proposed as never,
     });
 
     await prisma.scan.update({
@@ -259,7 +199,7 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
         repositoryId: repository.id,
         included: true,
         reason: 'included: passed prefilter, classified as self-hosted app',
-        extractedData: { analysis: trimForJson(analysis), classification, scores } as unknown as Prisma.InputJsonValue,
+        extractedData: { analysis: trimForJson(analysis.result), classification, scores } as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -273,18 +213,6 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
     console.error(`[discover] error processing ${fullName}:`, err);
     return 'error';
   }
-}
-
-async function uniqueSlug(name: string): Promise<string> {
-  const base = slugify(name) || 'app';
-  let slug = base;
-  let n = 1;
-  // eslint-disable-next-line no-await-in-loop
-  while (await prisma.application.findUnique({ where: { slug } })) {
-    n += 1;
-    slug = `${base}-${n}`;
-  }
-  return slug;
 }
 
 function trimForJson(analysis: AnalysisResult): Record<string, unknown> {

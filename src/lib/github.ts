@@ -2,6 +2,7 @@
 // Handles rate limiting (both primary and secondary/abuse limits) with backoff.
 
 const GITHUB_API = 'https://api.github.com';
+const NETWORK_TIMEOUT_MS = 20_000;
 
 function token(): string | undefined {
   return process.env.GITHUB_TOKEN;
@@ -36,9 +37,22 @@ export async function ghFetch(path: string, opts: FetchOptions = {}): Promise<Re
 
   let attempt = 0;
   for (;;) {
-    const res = await fetch(url, {
-      headers: headers(acceptRaw ? { Accept: 'application/vnd.github.raw+json' } : undefined),
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: headers(acceptRaw ? { Accept: 'application/vnd.github.raw+json' } : undefined),
+        signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS),
+      });
+    } catch (err) {
+      // Network-level failure (DNS, TCP, TLS, abort on timeout). Treat as transient:
+      // exponential backoff then return a synthetic 503 so callers see a single failure mode.
+      attempt++;
+      if (attempt > maxRetries) {
+        return new Response(`network error: ${(err as Error).message}`, { status: 503 });
+      }
+      await sleep(2 ** attempt * 1000);
+      continue;
+    }
 
     const remaining = Number(res.headers.get('x-ratelimit-remaining') ?? '1');
     const resetAt = Number(res.headers.get('x-ratelimit-reset') ?? '0');
@@ -72,6 +86,59 @@ export async function ghFetch(path: string, opts: FetchOptions = {}): Promise<Re
 
     return res;
   }
+}
+
+// Discriminated outcome for resource-shaped helpers. Callers that want to preserve valid
+// previously-saved data on transient failures match on `kind` and only clear fields on
+// `not_found`. Returning a bare null for every error was hiding "GitHub is being slow" as
+// "the project has no README" — refresh was wiping evidence it should have kept.
+export type ResourceFetch<T> =
+  | { kind: 'ok'; value: T }
+  | { kind: 'not_found' } // 404 or 410: resource genuinely absent
+  | { kind: 'rate_limited' } // 403/429 after backoff exhausted: should be retried later
+  | { kind: 'auth_error' } // 401, 403 with non-rate-limit body: token wrong/missing scope
+  | { kind: 'transient_error'; status: number }; // 5xx, network: retry on a future run
+
+function classifyFailure(res: Response): Exclude<ResourceFetch<never>, { kind: 'ok' }> {
+  const status = res.status;
+  if (status === 404 || status === 410) return { kind: 'not_found' };
+  if (status === 429) return { kind: 'rate_limited' };
+  if (status === 401) return { kind: 'auth_error' };
+  if (status === 403) {
+    // 403 with rate-limit headers is already exhausted inside ghFetch; whatever surfaces here
+    // is either abuse-detection (still throttling) or a permission/scope problem.
+    const remaining = Number(res.headers.get('x-ratelimit-remaining') ?? '1');
+    if (remaining === 0) return { kind: 'rate_limited' };
+    return { kind: 'auth_error' };
+  }
+  return { kind: 'transient_error', status };
+}
+
+async function resourceFetch<T>(
+  path: string,
+  acceptRaw: false,
+  parse: (data: unknown) => T
+): Promise<ResourceFetch<T>>;
+async function resourceFetch<T>(
+  path: string,
+  acceptRaw: true,
+  parse: (data: string) => T
+): Promise<ResourceFetch<T>>;
+async function resourceFetch<T>(
+  path: string,
+  acceptRaw: boolean,
+  parse: (data: any) => T
+): Promise<ResourceFetch<T>> {
+  const res = await ghFetch(path, { acceptRaw });
+  if (res.ok) {
+    try {
+      const body = acceptRaw ? await res.text() : await res.json();
+      return { kind: 'ok', value: parse(body) };
+    } catch (err) {
+      return { kind: 'transient_error', status: 200 };
+    }
+  }
+  return classifyFailure(res);
 }
 
 export interface GhRepoSearchItem {
@@ -157,36 +224,39 @@ export async function getRepositoryById(githubId: number | bigint): Promise<Repo
   return { found: true, repo: (await res.json()) as GhRepoSearchItem };
 }
 
-// Fetches root-level directory listing to detect Dockerfile/compose files without
-// downloading the whole repo.
+// Fetches root-level directory listing. Returns the discriminated outcome so callers can
+// distinguish GitHub outages from genuinely empty repositories.
 export async function getRootContents(
   owner: string,
   repo: string,
   path = ''
-): Promise<Array<{ name: string; type: string }> | null> {
-  const res = await ghFetch(`/repos/${owner}/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}`);
-  if (!res.ok) return null;
-  const data = await res.json();
-  return Array.isArray(data) ? data.map((f: any) => ({ name: f.name, type: f.type })) : null;
+): Promise<ResourceFetch<Array<{ name: string; type: string }>>> {
+  return resourceFetch(
+    `/repos/${owner}/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}`,
+    false,
+    (data) =>
+      Array.isArray(data) ? data.map((f: any) => ({ name: f.name, type: f.type })) : []
+  );
 }
 
-export async function getReadme(owner: string, repo: string): Promise<string | null> {
-  const res = await ghFetch(`/repos/${owner}/${repo}/readme`, { acceptRaw: true });
-  if (!res.ok) return null;
-  return res.text();
+export async function getReadme(owner: string, repo: string): Promise<ResourceFetch<string>> {
+  return resourceFetch(
+    `/repos/${owner}/${repo}/readme`,
+    true,
+    (data) => data as string
+  );
 }
 
 export async function getLatestRelease(
   owner: string,
   repo: string
-): Promise<{ tag_name: string; published_at: string } | null> {
-  const res = await ghFetch(`/repos/${owner}/${repo}/releases/latest`);
-  if (!res.ok) return null;
-  return res.json();
+): Promise<ResourceFetch<{ tag_name: string; published_at: string }>> {
+  return resourceFetch(`/repos/${owner}/${repo}/releases/latest`, false, (data) => data as {
+    tag_name: string;
+    published_at: string;
+  });
 }
 
-export async function getLanguages(owner: string, repo: string): Promise<Record<string, number> | null> {
-  const res = await ghFetch(`/repos/${owner}/${repo}/languages`);
-  if (!res.ok) return null;
-  return res.json();
+export async function getLanguages(owner: string, repo: string): Promise<ResourceFetch<Record<string, number>>> {
+  return resourceFetch(`/repos/${owner}/${repo}/languages`, false, (data) => data as Record<string, number>);
 }

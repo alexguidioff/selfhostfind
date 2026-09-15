@@ -1,4 +1,4 @@
-import { getRootContents, getReadme, getLatestRelease, getLanguages } from '@/lib/github';
+import { getRootContents, getReadme, getLatestRelease, getLanguages, type ResourceFetch } from '@/lib/github';
 
 export interface AnalysisResult {
   dockerfilePresent: boolean;
@@ -19,6 +19,21 @@ export interface AnalysisResult {
   latestReleaseTag: string | null;
   latestReleaseAt: Date | null;
   languages: Record<string, number> | null;
+}
+
+// Provenance: which GitHub fetch failed (if any) during analyze(). The refresh job needs
+// this to decide between "evidence genuinely absent" (clear fields) and "GitHub is sick,
+// preserve what we had" (leave fields alone and reschedule).
+export interface AnalysisDiagnostics {
+  contentsStatus: 'ok' | 'not_found' | 'rate_limited' | 'auth_error' | 'transient_error';
+  readmeStatus: 'ok' | 'not_found' | 'rate_limited' | 'auth_error' | 'transient_error';
+  releaseStatus: 'ok' | 'not_found' | 'rate_limited' | 'auth_error' | 'transient_error';
+  languagesStatus: 'ok' | 'not_found' | 'rate_limited' | 'auth_error' | 'transient_error';
+}
+
+export interface AnalysisOutcome {
+  result: AnalysisResult;
+  diagnostics: AnalysisDiagnostics;
 }
 
 const COMPOSE_FILENAMES = new Set(['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml']);
@@ -91,11 +106,19 @@ function extractDemoLink(readme: string): string | null {
   return m ? m[1] : null;
 }
 
+function kindOf<T>(result: ResourceFetch<T>): AnalysisDiagnostics['contentsStatus'] {
+  return result.kind;
+}
+
+function optionalValue<T>(result: ResourceFetch<T>): T | null {
+  return result.kind === 'ok' ? result.value : null;
+}
+
 export async function analyzeRepository(
   owner: string,
   repo: string,
   defaultBranch: string
-): Promise<AnalysisResult> {
+): Promise<AnalysisOutcome> {
   const [contents, readme, release, languages] = await Promise.all([
     getRootContents(owner, repo),
     getReadme(owner, repo),
@@ -103,13 +126,27 @@ export async function analyzeRepository(
     getLanguages(owner, repo),
   ]);
 
-  const files = (contents ?? []).filter((f) => f.type === 'file').map((f) => ({ name: f.name, path: f.name }));
+  const diagnostics: AnalysisDiagnostics = {
+    contentsStatus: kindOf(contents),
+    readmeStatus: kindOf(readme),
+    releaseStatus: kindOf(release),
+    languagesStatus: kindOf(languages),
+  };
+
+  const rootListing = optionalValue(contents) ?? [];
+  const files = rootListing
+    .filter((f) => f.type === 'file')
+    .map((f) => ({ name: f.name, path: f.name }));
   // ponytail: one level in deployment directories; expand only for observed missed layouts.
-  const directories = (contents ?? []).filter((f) => f.type === 'dir' &&
+  const directories = rootListing.filter((f) => f.type === 'dir' &&
     ['docker', 'deploy', 'deployment', 'compose', '.docker'].includes(f.name.toLowerCase()));
   for (const directory of directories) {
     const children = await getRootContents(owner, repo, directory.name);
-    for (const file of children ?? []) {
+    if (children.kind !== 'ok') {
+      diagnostics.contentsStatus = children.kind;
+      continue;
+    }
+    for (const file of children.value) {
       if (file.type === 'file') files.push({ name: file.name, path: `${directory.name}/${file.name}` });
     }
   }
@@ -117,7 +154,8 @@ export async function analyzeRepository(
   const composePath = files.find((f) => COMPOSE_FILENAMES.has(f.name.toLowerCase()))?.path ?? null;
   const composePresent = composePath !== null;
 
-  const readmeFull = readme ?? '';
+  const readmeText = readme.kind === 'ok' ? readme.value : '';
+  const readmeFull = readmeText;
   const readmeExcerpt = readmeFull ? readmeFull.slice(0, 4000) : null;
 
   const combinedText = readmeFull; // README is the richest signal source
@@ -142,23 +180,26 @@ export async function analyzeRepository(
   }
 
   return {
-    dockerfilePresent,
-    composePresent,
-    composePath,
-    readmeExcerpt,
-    readmeFull: readmeFull || null,
-    screenshotUrls,
-    databases,
-    envVars,
-    ports,
-    containerImage: containerImageMatch ? containerImageMatch[1] : null,
-    arm64Supported: armMentioned ? true : null,
-    amd64Supported: amdMentioned ? true : null,
-    installMethods: [...new Set(installMethods)],
-    documentationUrl: readmeFull ? extractDocLink(readmeFull) : null,
-    demoUrl: readmeFull ? extractDemoLink(readmeFull) : null,
-    latestReleaseTag: release?.tag_name ?? null,
-    latestReleaseAt: release?.published_at ? new Date(release.published_at) : null,
-    languages,
+    diagnostics,
+    result: {
+      dockerfilePresent,
+      composePresent,
+      composePath,
+      readmeExcerpt,
+      readmeFull: readmeFull || null,
+      screenshotUrls,
+      databases,
+      envVars,
+      ports,
+      containerImage: containerImageMatch ? containerImageMatch[1] : null,
+      arm64Supported: armMentioned ? true : null,
+      amd64Supported: amdMentioned ? true : null,
+      installMethods: [...new Set(installMethods)],
+      documentationUrl: readmeFull ? extractDocLink(readmeFull) : null,
+      demoUrl: readmeFull ? extractDemoLink(readmeFull) : null,
+      latestReleaseTag: release.kind === 'ok' ? release.value.tag_name : null,
+      latestReleaseAt: release.kind === 'ok' && release.value.published_at ? new Date(release.value.published_at) : null,
+      languages: languages.kind === 'ok' ? languages.value : null,
+    },
   };
 }

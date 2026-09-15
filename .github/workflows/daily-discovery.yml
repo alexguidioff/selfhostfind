@@ -5,6 +5,13 @@ on:
     - cron: "0 3 * * *" # 03:00 UTC daily
   workflow_dispatch: {}
 
+concurrency:
+  # Don't run two daily-discovery workflows concurrently: a manual dispatch overlapping
+  # with the cron would clobber each other's writes. atomic scan claims in the pipeline
+  # are the last line of defense, not the first.
+  group: daily-discovery
+  cancel-in-progress: false
+
 jobs:
   discover:
     runs-on: ubuntu-latest
@@ -13,7 +20,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.4
 
       - uses: actions/setup-node@v4
         with:
@@ -38,6 +45,22 @@ jobs:
           ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
           HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
         run: pnpm discover
+
+      - name: Refresh catalog (re-analyze known repos)
+        # Refresh sits between discovery and snapshot: it re-uses discover's analyses for
+        # never-scanned rows and feeds the snapshot job fresh stars numbers. If it errors,
+        # the catalog is still consistent with yesterday's snapshot — keep going.
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GITHUB_TOKEN: ${{ secrets.GH_DISCOVERY_TOKEN }}
+          REFRESH_CONCURRENCY: ${{ vars.REFRESH_CONCURRENCY }}
+          REFRESH_MAX_REPOS: ${{ vars.REFRESH_MAX_REPOS }}
+          REFRESH_STALE_DAYS: ${{ vars.REFRESH_STALE_DAYS }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: pnpm refresh
+        continue-on-error: true
 
       - name: Reconcile catalog against GitHub (renames/archival/deletion)
         env:

@@ -59,7 +59,16 @@ model Repository {
 
   discoveredAt   DateTime @default(now())
   lastScannedAt  DateTime?
+  lastScanAttemptAt DateTime?
+  lastScanError  String?
   discoverySource String[] @default([]) // which search queries surfaced this repo (provenance)
+
+  // Atomic scan claim: when a refresh worker picks a repo, it sets these three to its own
+  // worker id + a short TTL. A second worker can only take over after expiry, so two
+  // concurrent runs (CI plus a manual CLI, for example) won't write the same row at once.
+  scanClaimId        String?
+  scanClaimExpiresAt DateTime?
+  scanClaimWorkerId  String?
 
   application    Application?
   snapshots      MetricSnapshot[]
@@ -72,6 +81,7 @@ model Repository {
   @@index([pushedAt])
   @@index([archived, fork])
   @@index([unreachable])
+  @@index([scanClaimExpiresAt])
 }
 
 // The curated/derived "product" view of a Repository: classification, install metadata,

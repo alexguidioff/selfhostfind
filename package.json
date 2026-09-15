@@ -21,6 +21,7 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "seed": "tsx --env-file-if-exists=.env prisma/seed.ts",
     "discover": "tsx --env-file-if-exists=.env src/pipeline/discover.ts",
+    "refresh": "tsx --env-file-if-exists=.env src/pipeline/refresh.ts",
     "reconcile": "tsx --env-file-if-exists=.env src/pipeline/reconcile.ts",
     "snapshot": "tsx --env-file-if-exists=.env src/pipeline/snapshot.ts",
     "reclassify": "tsx --env-file-if-exists=.env src/pipeline/reclassify.ts"
