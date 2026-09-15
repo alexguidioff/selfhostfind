@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db';
 import { Badge } from '@/components/Badge';
 import { AppCard } from '@/components/AppCard';
 import { AppStructuredData } from '@/components/StructuredData';
+import { ReportErrorLink } from '@/components/ReportLinks';
 import { timeAgo } from '@/lib/types';
 
 export const revalidate = 300;
@@ -144,6 +145,11 @@ export default async function AppDetailPage({ params }: { params: Promise<{ slug
           </dl>
           <a className="inline-block underline mt-3" href={`${app.repository.repositoryUrl}#readme`} target="_blank" rel="noreferrer">Read upstream evidence →</a>
         </section>
+
+        <p className="mt-6 text-sm text-slate-500">
+          Spotted a wrong category, license, or installation detail?{' '}
+          <ReportErrorLink appSlug={app.slug} />
+        </p>
 
         {alternatives.length > 0 && (
           <div className="mt-8">

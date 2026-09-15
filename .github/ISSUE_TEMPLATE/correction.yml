@@ -1,0 +1,42 @@
+name: Report a correction
+description: Flag an error in an existing catalog entry.
+labels: ["correction"]
+body:
+  - type: input
+    id: app
+    attributes:
+      label: Application
+      description: Slug or full URL of the affected catalog entry.
+      placeholder: "paperless-ngx"
+    validations:
+      required: true
+  - type: input
+    id: field
+    attributes:
+      label: Field
+      description: Which field is wrong? (category, license, dockerSupported, …)
+      placeholder: "category"
+    validations:
+      required: true
+  - type: textarea
+    id: wrong
+    attributes:
+      label: What's currently shown
+      description: Paste the value as it appears in the catalog right now.
+    validations:
+      required: true
+  - type: textarea
+    id: correct
+    attributes:
+      label: What it should be
+      description: The proposed correction.
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Source for the correction
+      description: Link or note showing the correct value (repo docs, README, official site, …).
+      placeholder: "https://github.com/owner/repo#docker"
+    validations:
+      required: true

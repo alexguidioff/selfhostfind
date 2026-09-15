@@ -1,0 +1,34 @@
+name: Suggest an application
+description: Propose a self-hosted application to add to the catalog.
+labels: ["suggestion"]
+body:
+  - type: input
+    id: repository_url
+    attributes:
+      label: Repository URL
+      description: Direct link to the GitHub (or other forge) repository.
+      placeholder: "https://github.com/owner/repo"
+    validations:
+      required: true
+  - type: input
+    id: name
+    attributes:
+      label: Application name
+      description: How the project calls itself on its homepage.
+      placeholder: "Paperless-ngx"
+    validations:
+      required: true
+  - type: input
+    id: category
+    attributes:
+      label: Proposed category
+      description: Which of the catalog categories fits best.
+      placeholder: "Documents"
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is this interesting?
+      description: One short paragraph on what makes this worth surfacing in the catalog.
+      placeholder: "Mature document management with OCR, runs well on a NAS, Docker Compose ready."
+    validations:
+      required: true

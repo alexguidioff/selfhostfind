@@ -8,6 +8,7 @@ import { FilterBar } from '@/components/FilterBar';
 import { SearchBar } from '@/components/SearchBar';
 import { Hero } from '@/components/Hero';
 import { WebsiteStructuredData } from '@/components/StructuredData';
+import { SuggestAppLink } from '@/components/ReportLinks';
 
 export const revalidate = 300; // catalog data changes at most daily; 5 min cache is plenty
 
@@ -94,7 +95,17 @@ function Section({ title, apps }: { title: string; apps: AppWithRepo[] }) {
 
 function Grid({ apps }: { apps: AppWithRepo[] }) {
   if (apps.length === 0) {
-    return <p className="text-sm text-slate-500">No applications match these filters yet.</p>;
+    return (
+      <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-700 p-6 text-center">
+        <p className="text-sm text-slate-500">No applications match these filters yet.</p>
+        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+          Know a self-hosted project that belongs here?
+        </p>
+        <div className="mt-3 flex justify-center">
+          <SuggestAppLink />
+        </div>
+      </div>
+    );
   }
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
