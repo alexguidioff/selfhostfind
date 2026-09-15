@@ -9,15 +9,16 @@ import { prisma } from '@/lib/db';
 import { searchRepositories, type GhRepoSearchItem } from '@/lib/github';
 import { buildDiscoveryQueries, labelForQuery } from './queries';
 import { prefilterRepository } from './prefilter';
-import { analyzeRepository, type AnalysisResult } from './analyze';
+import { analyzeRepository, assertCompleteAnalysis, type AnalysisResult } from './analyze';
 import { classify } from '@/lib/classification';
 import { sendAlert, pingHeartbeat } from '@/lib/alerts';
 import { runWithConcurrency } from './concurrency';
-import { buildApplicationUpdate, buildScores, repoItemFromSearch, uniqueSlug, applyManualOverrides, scoreUpdate, SCORE_FIELDS, type RepoItem } from './persist';
-import { computeStarsGained30dByGithubId } from './stars-since';
+import { buildApplicationUpdate, buildScores, repoItemFromSearch, uniqueSlug, scoreUpdate } from './persist';
+import { refreshOne } from './refresh';
+import { positiveInt } from './refresh.args';
 
-const MAX_PAGES_PER_QUERY = Number(process.env.DISCOVERY_MAX_PAGES_PER_QUERY ?? 2);
-const CONCURRENCY = Number(process.env.DISCOVERY_CONCURRENCY ?? 3);
+const MAX_PAGES_PER_QUERY = positiveInt(process.env.DISCOVERY_MAX_PAGES_PER_QUERY, 2);
+const CONCURRENCY = positiveInt(process.env.DISCOVERY_CONCURRENCY, 3);
 
 interface Candidate {
   item: GhRepoSearchItem;
@@ -68,7 +69,7 @@ async function collectCandidates(): Promise<Map<number, Candidate>> {
   return candidates;
 }
 
-async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
+export async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
   const { item, sources } = candidate;
   const fullName = item.full_name;
   const license = item.license?.spdx_id ?? null;
@@ -78,6 +79,14 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
   });
 
   try {
+    const existing = await prisma.repository.findUnique({ where: { githubId: BigInt(item.id) } });
+    if (existing) {
+      const outcome = await refreshOne(existing);
+      await prisma.scan.update({ where: { id: scan.id }, data: {
+        repositoryId: existing.id, status: outcome.status === 'error' ? 'FAILED' : 'SUCCEEDED', completedAt: new Date(), reason: outcome.reason,
+      } });
+      return outcome.status === 'error' ? 'error' : 'ok';
+    }
     const pre = prefilterRepository(item);
     if (!pre.passed) {
       await prisma.scan.update({
@@ -90,6 +99,7 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
     await prisma.scan.update({ where: { id: scan.id }, data: { stage: 'analyze' } });
     const analysis = await analyzeRepository(item.owner.login, item.name, item.default_branch);
 
+    assertCompleteAnalysis(analysis);
     await prisma.scan.update({ where: { id: scan.id }, data: { stage: 'classify' } });
     const classification = classify({
       name: item.name,
@@ -113,21 +123,12 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
     }
 
     await prisma.scan.update({ where: { id: scan.id }, data: { stage: 'score' } });
-    // Compute the 30-day growth delta using whatever snapshot history exists. A brand-
-    // new repo returns null (no usable reference) and the score formula treats that
-    // as a 0 growthScore; a rediscovered repo that already has snapshots keeps its
-    // existing value rather than having it zeroed out on every discovery run.
-    const starsGained30d = await computeStarsGained30dByGithubId(BigInt(item.id), item.stargazers_count);
-
-    await prisma.scan.update({ where: { id: scan.id }, data: { stage: 'persist' } });
-
-    // Repository id is filled in by the upsert below; we use a placeholder here so
-    // the score payload has the right shape.
+    // Known repositories use refreshOne above, including their snapshot history.
     const repo = repoItemFromSearch(item, '');
-
-    const repository = await prisma.repository.upsert({
-      where: { githubId: repo.githubId },
-      create: {
+    const scores = buildScores({ repo, analysis, classification, starsGained30d: null });
+    await prisma.$transaction(async (tx) => {
+    const repository = await tx.repository.create({
+      data: {
         githubId: repo.githubId,
         owner: repo.fullName.split('/')[0],
         name: repo.name,
@@ -154,66 +155,17 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
         discoverySource: [...sources],
         lastScannedAt: new Date(),
       },
-      update: {
-        description: repo.description,
-        homepageUrl: repo.homepageUrl,
-        stars: repo.stars,
-        forks: repo.forks,
-        watchers: repo.watchers,
-        openIssues: repo.openIssues,
-        license: repo.license,
-        primaryLanguage: repo.primaryLanguage,
-        languages: analysis.result.languages ?? undefined,
-        topics: repo.topics,
-        readmeExcerpt: analysis.result.readmeExcerpt,
-        pushedAt: repo.pushedAt,
-        latestReleaseAt: analysis.result.latestReleaseAt,
-        latestReleaseTag: analysis.result.latestReleaseTag,
-        archived: repo.archived,
-        discoverySource: { push: [...sources] },
-        lastScannedAt: new Date(),
-      },
     });
 
-    const existingApp = await prisma.application.findUnique({ where: { repositoryId: repository.id } });
+    const proposed = {
+      ...buildApplicationUpdate({ repo, analysis, classification, existingApplication: null }),
+      ...scoreUpdate(scores, null),
+    };
+    await tx.application.create({ data: {
+      ...proposed, repositoryId: repository.id, slug: await uniqueSlug(tx, repo.name),
+    } as Prisma.ApplicationUncheckedCreateInput });
 
-    // Apply manual overrides AFTER scores are merged in, not before — otherwise the
-    // override-protection pass would strip scores that were just written, and a
-    // manually-corrected healthScore would silently revert to an automated one.
-    // buildApplicationUpdate already protects its own fields; scores need the same
-    // treatment but with their own key set.
-    const proposed = buildApplicationUpdate({
-      repo,
-      analysis,
-      classification,
-      existingApplication: existingApp,
-    });
-    const scores = buildScores({ repo, analysis, classification, starsGained30d });
-    for (const [key, value] of Object.entries(scoreUpdate(scores))) {
-      proposed[key] = value;
-    }
-    // Strip any score fields the admin marked as manual. The breakdown and
-    // algorithmVersion travel with the score so the UI can explain it; mark them
-    // manual too so a forced recalc doesn't show a stale breakdown next to a current
-    // override.
-    const overrides = (existingApp?.manualOverrides as Record<string, boolean> | null) ?? {};
-    for (const key of SCORE_FIELDS) {
-      if (overrides[key]) {
-        delete proposed[key];
-      }
-    }
-
-    await prisma.application.upsert({
-      where: { repositoryId: repository.id },
-      create: {
-        repositoryId: repository.id,
-        slug: await uniqueSlug(prisma, repo.name),
-        ...proposed,
-      } as never,
-      update: proposed as never,
-    });
-
-    await prisma.scan.update({
+    await tx.scan.update({
       where: { id: scan.id },
       data: {
         status: 'SUCCEEDED',
@@ -225,6 +177,7 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
       },
     });
 
+    });
     console.log(`[discover] included ${fullName} (health=${scores.healthScore})`);
     return 'ok';
   } catch (err) {
@@ -266,7 +219,8 @@ export async function runDiscovery(): Promise<{ candidateCount: number; elapsedS
 
   const elapsedSeconds = Number(((Date.now() - startedAt) / 1000).toFixed(1));
   console.log(`[discover] done in ${elapsedSeconds}s (${errorCount} errors)`);
-  await pingHeartbeat();
+  if (outcomes.length && errorCount === outcomes.length) throw new Error('All discovery candidates failed');
+  if (!errorCount) await pingHeartbeat();
   return { candidateCount: candidates.size, elapsedSeconds };
 }
 

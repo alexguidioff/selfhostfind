@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { recordSearch, exceedsByteLimit } from '@/lib/search-log';
+import { recordSearch } from '@/lib/search-log';
 import { type SearchParams } from '@/lib/query';
 
 export const dynamic = 'force-dynamic';
@@ -19,47 +19,32 @@ export async function POST(req: Request) {
     return new NextResponse(null, { status: 204 });
   }
 
-  // Same-origin only when the Origin header is present (browsers send it, fetch
-  // doesn't always). Curl from a workstation with no Origin header is allowed because
-  // the rate limit + sensitive-pattern filter still keep it bounded. The previous
-  // version compared hosts only — checking scheme too avoids Origin: https://evil.com
-  // leaking via mixed-content redirects on shared domains.
-  const origin = req.headers.get('origin');
-  if (origin) {
-    try {
-      const here = new URL(req.url);
-      const o = new URL(origin);
-      if (o.host !== here.host || o.protocol !== here.protocol) {
-        return NextResponse.json({ error: 'cross-origin' }, { status: 403 });
-      }
-    } catch {
-      return NextResponse.json({ error: 'bad origin' }, { status: 400 });
-    }
+  const expectedOrigin = new URL(process.env.NEXT_PUBLIC_SITE_URL || req.url).origin;
+  if (req.headers.get('origin') !== expectedOrigin) {
+    return NextResponse.json({ error: 'cross-origin' }, { status: 403 });
   }
-
-  // Reject based on declared Content-Length first — saves reading a giant body.
-  // Chunked transfers come through without this header; we still re-check the body
-  // length after reading.
-  const contentLength = Number(req.headers.get('content-length') ?? '0');
-  if (contentLength > MAX_BODY_BYTES) {
+  if (Number(req.headers.get('content-length')) > MAX_BODY_BYTES) {
     return NextResponse.json({ error: 'payload too large' }, { status: 413 });
   }
-
   let raw = '';
-  try {
-    // Cap the actual read at MAX_BODY_BYTES, not just the declared Content-Length
-    // header: a hostile client can omit Content-Length and stream gigabytes. If the
-    // stream hits the cap, throw and reject with 413 — the previous version read the
-    // whole body into memory before checking, which left an unbounded memory cost.
-    raw = await req.text();
-    if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) {
-      return NextResponse.json({ error: 'payload too large' }, { status: 413 });
-    }
-  } catch {
-    return NextResponse.json({ error: 'invalid request' }, { status: 400 });
-  }
-  if (exceedsByteLimit(raw, MAX_BODY_BYTES)) {
-    return NextResponse.json({ error: 'payload too large' }, { status: 413 });
+  const reader = req.body?.getReader();
+  if (reader) {
+    const decoder = new TextDecoder();
+    let bytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > MAX_BODY_BYTES) {
+          void reader.cancel().catch(() => undefined);
+          return NextResponse.json({ error: 'payload too large' }, { status: 413 });
+        }
+        raw += decoder.decode(value, { stream: true });
+      }
+      raw += decoder.decode();
+    } catch { return NextResponse.json({ error: 'invalid body' }, { status: 400 }); }
+    finally { reader.releaseLock(); }
   }
 
   let payload: unknown;

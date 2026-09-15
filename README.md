@@ -291,7 +291,7 @@ links point at. Requires GitHub Issues to be enabled on that repository.
 
 ## Search logs (zero-result aggregates)
 
-`SEARCH_LOG_ENABLED=true` turns on opt-in logging of zero-result searches. Off by default.
+`SEARCH_LOG_ENABLED=true` turns on aggregate logging of submitted searches and their zero-result counts. Off by default.
 When enabled, `SearchBar.tsx` fires a POST to `/api/search-log` on each explicit form
 submit; the server re-runs the same query against the catalog to determine whether the
 search actually returned zero results, then increments a daily aggregate row. Events are
@@ -407,3 +407,35 @@ the six new categories (source links in `src/tests/classification-corpus.ts`), p
 ambiguity and exclusion cases. This small curated sample is not an estimate of accuracy
 across the whole catalog. PostgreSQL tests also verify that reclassification preserves
 manual corrections and that private/hidden listings do not leak into alternative pages.
+
+
+### Completion and rollout checks
+
+Refresh now rejects every incomplete GitHub analysis before updating catalog evidence.
+Rediscovery of known repositories uses the same refresh path. A unique token per scan
+fences expired workers; the repository, application and successful scan record commit
+in one transaction. An admin edit made during network I/O is read again before saving.
+Negative classifications queue a review and retain the existing listing. Growth uses
+the latest snapshot at or before 30 days ago, with at most 48 hours of older history.
+
+For search aggregation, enable `SEARCH_LOG_ENABLED=true` on the server and rebuild with
+`NEXT_PUBLIC_SEARCH_LOG_ENABLED=true`. Docker Compose passes the build argument from
+`SEARCH_LOG_ENABLED` automatically. Configure `NEXT_PUBLIC_SITE_URL` to the public origin
+when running behind a proxy. Submitted queries with and without results are aggregated
+for 30 days, with separate home/category/alternative scopes; no visitor identity is
+collected. Terms are filtered conservatively, but aggregation does not guarantee anonymity.
+The per-process rate cap is intended for a single web instance; scale it only when deploying
+multiple instances. GitHub report links open a public form for the user to review and submit.
+
+Before release: take and verify a database backup, apply `pnpm prisma migrate deploy`,
+run `pnpm refresh --dry-run --repo owner/name`, then a limited real refresh. The
+`20260919090000_drop_legacy_search_index` migration removes a leftover three-column index
+that otherwise prevents separate search contexts. The snapshot-day backfill on this
+unreleased branch was corrected to cast UTC-stored timestamps directly to dates; test
+migrations on a copy of existing data before deployment. If an earlier draft of these
+migrations was applied outside a disposable database, inspect migration checksums and
+snapshot history first; do not reset production or mark an altered migration applied blindly.
+
+Disable the refresh schedule and search collection to roll back operationally. Keep
+additive database fields in place. Runtime dependency major upgrades remain separate;
+see `SECURITY_AUDIT.md` for the verified outstanding advisories.

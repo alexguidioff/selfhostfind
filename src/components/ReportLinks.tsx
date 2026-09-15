@@ -12,21 +12,14 @@ function buildUrl(template: 'suggest' | 'correction', params: Record<string, str
   return `https://github.com/${REPO}/issues/new?${qs.toString()}`;
 }
 
-// The textarea inside the empty-state is intentionally not interactive: it's a
-// pre-baked link styled like a button, so the catalog grid stays visually flat.
-export function SuggestAppLink({ query }: { query?: string }) {
-  const params: Record<string, string> = {};
-  // Only attach the current search term if the user typed something. We deliberately
-  // never include the user-agent, the page path, or any other ambient data — the plan
-  // is explicit that the bug-report payload must NOT leak what the user searched for.
-  const trimmed = (query ?? '').trim();
-  if (trimmed) params['q'] = trimmed;
-  const href = buildUrl('suggest', params);
+export function SuggestAppLink() {
+  const href = buildUrl('suggest');
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
+      title="Opens a public GitHub issue form; a GitHub account is required"
       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
     >
       Suggest an app
@@ -42,6 +35,7 @@ export function ReportErrorLink({ appSlug }: { appSlug: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
+      title="Opens a public GitHub issue form; a GitHub account is required"
       className="inline-flex items-center gap-1 rounded-md text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white underline-offset-2 hover:underline"
     >
       Report an error

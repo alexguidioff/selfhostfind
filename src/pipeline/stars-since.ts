@@ -8,6 +8,7 @@
 // Returns null when no usable reference exists; the caller must surface that as a real
 // "insufficient history" signal, never as a 0% growth.
 
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 
 interface ReferenceOutcome {
@@ -18,13 +19,14 @@ interface ReferenceOutcome {
 export async function computeStarsGained30d(
   repositoryId: string,
   currentStars: number,
-  now: Date = new Date()
+  now: Date = new Date(),
+  db: Prisma.TransactionClient = prisma
 ): Promise<ReferenceOutcome> {
   const target = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const toleranceMs = 48 * 60 * 60 * 1000;
   const min = new Date(target.getTime() - toleranceMs);
-  const max = new Date(target.getTime() + toleranceMs);
-  const reference = await prisma.metricSnapshot.findFirst({
+  const max = target;
+  const reference = await db.metricSnapshot.findFirst({
     where: { repositoryId, recordedAt: { gte: min, lte: max } },
     orderBy: { recordedAt: 'desc' },
   });

@@ -62,7 +62,7 @@ describe('validateFilterValue', () => {
   });
 
   it('rejects unknown filter keys', () => {
-    expect(validateFilterValue('sort', 'trending')).toBe(false);
+    expect(validateFilterValue('sort', 'trending')).toBe(true);
     expect(validateFilterValue('q', 'self hosted')).toBe(false);
   });
 
@@ -94,7 +94,7 @@ describe('filterSignature', () => {
   });
 
   it('ignores non-allowlisted keys', () => {
-    const signature = filterSignature({ sort: 'trending', q: 'foo', category: 'Media' });
+    const signature = filterSignature({ sort: 'health', q: 'foo', category: 'Media' });
     expect(signature).toBe('category=Media');
   });
 });

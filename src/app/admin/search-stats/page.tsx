@@ -39,12 +39,12 @@ export default async function SearchStatsPage() {
   // Group by normalized query + filter signature so the user can see patterns, not raw
   // daily buckets. Sum across days gives the 30-day picture.
   type Agg = {
-    query: string; filters: string; searches: number; zero: number;
+    query: string; context: string; filters: string; searches: number; zero: number;
     days: number; lastSeen: Date;
   };
   const grouped = new Map<string, Agg>();
   for (const r of rows) {
-    const key = `${r.normalizedQuery}::${r.filterSignature}`;
+    const key = JSON.stringify([r.normalizedQuery, r.filterSignature, r.context]);
     const existing = grouped.get(key);
     if (existing) {
       existing.searches += r.searchCount;
@@ -54,6 +54,7 @@ export default async function SearchStatsPage() {
     } else {
       grouped.set(key, {
         query: r.normalizedQuery,
+        context: r.context,
         filters: r.filterSignature || '(no filters)',
         searches: r.searchCount,
         zero: r.zeroResultCount,
@@ -81,7 +82,7 @@ export default async function SearchStatsPage() {
         These are the strongest &ldquo;the catalog is missing something&rdquo; signals: a search hits
         the full catalog and finds nothing.
       </p>
-      <StatsTable rows={flat.filter((r) => r.filters === '(no filters)')} />
+      <StatsTable rows={flat.filter((r) => r.filters === '(no filters)' && r.context === 'home')} />
 
       <h2 className="text-sm font-semibold mt-8 mb-2">Filtered queries</h2>
       <p className="text-xs text-slate-500 mb-2">
@@ -89,7 +90,7 @@ export default async function SearchStatsPage() {
         is too narrow. Treat these as a starting point for manual investigation, not a
         catalog gap to fill automatically.
       </p>
-      <StatsTable rows={flat.filter((r) => r.filters !== '(no filters)')} />
+      <StatsTable rows={flat.filter((r) => r.filters !== '(no filters)' || r.context !== 'home')} />
 
       <p className="mt-8 text-sm">
         <Link href="/admin" className="underline">← Back to admin</Link>
@@ -98,7 +99,7 @@ export default async function SearchStatsPage() {
   );
 }
 
-function StatsTable({ rows }: { rows: Array<{ query: string; filters: string; searches: number; zero: number; days: number; lastSeen: Date }> }) {
+function StatsTable({ rows }: { rows: Array<{ query: string; context: string; filters: string; searches: number; zero: number; days: number; lastSeen: Date }> }) {
   if (rows.length === 0) {
     return <p className="text-sm text-slate-500">No data in the last 30 days.</p>;
   }
@@ -108,6 +109,7 @@ function StatsTable({ rows }: { rows: Array<{ query: string; filters: string; se
         <thead className="bg-slate-50 dark:bg-slate-900 text-left">
           <tr>
             <th className="px-3 py-2">Query</th>
+            <th className="px-3 py-2">Context</th>
             <th className="px-3 py-2">Filters</th>
             <th className="px-3 py-2 text-right">Searches</th>
             <th className="px-3 py-2 text-right">Zero</th>
@@ -118,8 +120,9 @@ function StatsTable({ rows }: { rows: Array<{ query: string; filters: string; se
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={`${r.query}-${r.filters}`} className="border-t border-slate-200 dark:border-slate-800">
+            <tr key={JSON.stringify([r.query, r.filters, r.context])} className="border-t border-slate-200 dark:border-slate-800">
               <td className="px-3 py-2 font-mono text-xs">{r.query || '(empty)'}</td>
+              <td className="px-3 py-2 text-xs">{r.context}</td>
               <td className="px-3 py-2 font-mono text-xs">{r.filters}</td>
               <td className="px-3 py-2 text-right tabular-nums">{r.searches}</td>
               <td className="px-3 py-2 text-right tabular-nums">{r.zero}</td>

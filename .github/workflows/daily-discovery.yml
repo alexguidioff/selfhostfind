@@ -46,6 +46,17 @@ jobs:
           HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
         run: pnpm discover
 
+      - name: Reconcile catalog against GitHub (renames/archival/deletion)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GITHUB_TOKEN: ${{ secrets.GH_DISCOVERY_TOKEN }}
+          RECONCILE_CONCURRENCY: ${{ vars.RECONCILE_CONCURRENCY }}
+          SCAN_RETENTION_DAYS: ${{ vars.SCAN_RETENTION_DAYS }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
+        run: pnpm reconcile
+
       - name: Refresh catalog (re-analyze known repos)
         # Refresh sits between discovery and snapshot: it re-uses discover's analyses for
         # never-scanned rows and feeds the snapshot job fresh stars numbers. If it errors,
@@ -66,18 +77,6 @@ jobs:
           ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
           HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
         run: pnpm refresh
-        continue-on-error: true
-
-      - name: Reconcile catalog against GitHub (renames/archival/deletion)
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          GITHUB_TOKEN: ${{ secrets.GH_DISCOVERY_TOKEN }}
-          RECONCILE_CONCURRENCY: ${{ vars.RECONCILE_CONCURRENCY }}
-          SCAN_RETENTION_DAYS: ${{ vars.SCAN_RETENTION_DAYS }}
-          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
-          ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
-          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
-        run: pnpm reconcile
 
       - name: Record metric snapshots
         env:
@@ -96,4 +95,3 @@ jobs:
         run: |
           PGPASSWORD=$(echo "$DATABASE_URL" | sed -E 's|.*://[^:]+:([^@]+)@.*|\1|') \
           psql "$DATABASE_URL" -tAc "WITH d AS (DELETE FROM \"SearchAggregate\" WHERE \"dayUtc\" < NOW() - INTERVAL '30 days' RETURNING 1) SELECT count(*) FROM d;"
-        continue-on-error: true

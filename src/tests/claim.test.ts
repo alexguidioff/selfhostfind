@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest';
 import { PrismaClient } from '@prisma/client';
-import { tryClaim, renew, release, updateIfOwner, currentWorkerId } from '@/pipeline/claim';
+import { tryClaim, renew, release, updateIfOwner, currentWorkerId, type ClaimHandle } from '@/pipeline/claim';
 
 // Integration test: requires a real Postgres with the project's schema migrated.
 // The CI suite runs with TEST_DATABASE_URL pointing at a throwaway database
@@ -20,6 +20,7 @@ const skipUnless = TEST_DATABASE_URL ? describe : describe.skip;
 skipUnless('scan claim', () => {
   let prisma: PrismaClient;
   let repoId: string;
+  let claim: ClaimHandle;
 
   beforeAll(async () => {
     if (!TEST_DATABASE_URL) throw new Error('TEST_DATABASE_URL is required for claim.test.ts');
@@ -88,26 +89,26 @@ skipUnless('scan claim', () => {
   });
 
   it('renew extends the TTL only for the owner', async () => {
-    await tryClaim(prisma, repoId, 1000);
+    claim = (await tryClaim(prisma, repoId, 1000))!;
     await prisma.repository.update({ where: { id: repoId }, data: { scanClaimId: 'thief' } });
-    const renewed = await renew(prisma, repoId, 60_000);
+    const renewed = await renew(prisma, repoId, claim, 60_000);
     expect(renewed).toBeNull();
   });
 
   it('updateIfOwner commits only when we still hold the claim', async () => {
-    await tryClaim(prisma, repoId, 60_000);
-    const ok = await updateIfOwner(prisma, repoId, { description: 'updated-by-owner' });
+    claim = (await tryClaim(prisma, repoId, 60_000))!;
+    const ok = await updateIfOwner(prisma, repoId, claim, { description: 'updated-by-owner' });
     expect(ok).toBe(1);
-    await release(prisma, repoId);
-    const denied = await updateIfOwner(prisma, repoId, { description: 'after-release' });
+    await release(prisma, repoId, claim);
+    const denied = await updateIfOwner(prisma, repoId, claim, { description: 'after-release' });
     expect(denied).toBe(0);
     const row = await prisma.repository.findUniqueOrThrow({ where: { id: repoId } });
     expect(row.description).toBe('updated-by-owner');
   });
 
   it('release clears the claim so a follow-up tryClaim succeeds', async () => {
-    await tryClaim(prisma, repoId, 60_000);
-    await release(prisma, repoId);
+    claim = (await tryClaim(prisma, repoId, 60_000))!;
+    await release(prisma, repoId, claim);
     // After release, a brand new tryClaim should succeed (we're not stealing from
     // ourselves; the second one is a fresh acquisition by a now-non-owner).
     const second = await tryClaim(prisma, repoId, 60_000);

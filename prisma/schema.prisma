@@ -176,7 +176,7 @@ model MetricSnapshot {
   // timezone in earlier migrations of this project). Maintained by the snapshot job.
   recordedDay  DateTime @db.Date
 
-  @@unique([repositoryId, recordedDay])
+  @@unique([repositoryId, recordedDay], map: "MetricSnapshot_repository_day_key")
   @@index([repositoryId, recordedAt])
   @@index([recordedDay])
 }
@@ -197,7 +197,7 @@ model SearchAggregate {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  @@unique([dayUtc, normalizedQuery, filterSignature, context])
+  @@unique([dayUtc, normalizedQuery, filterSignature, context], map: "SearchAggregate_dayUtc_normalizedQuery_filterSignatu_key")
   @@index([dayUtc])
 }
 

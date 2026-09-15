@@ -5,7 +5,7 @@ import { prisma } from '@/lib/db';
 import { computeScores } from '@/lib/scoring';
 import { resolveVerificationStatus } from '@/lib/verification';
 import { sendAlert, pingHeartbeat } from '@/lib/alerts';
-import { scoreUpdate, SCORE_FIELDS } from './persist';
+import { scoreUpdate, applyManualOverrides } from './persist';
 import { computeStarsGained30d } from './stars-since';
 
 // UTC day boundary, used as the dedupe key for snapshots. Postgres side via the
@@ -32,13 +32,18 @@ export async function runSnapshot(clock: Clock = realClock): Promise<void> {
 
   const todayUtc = startOfUtcDay(clock.now());
 
-  for (const repo of repos) {
+  for (const candidate of repos) {
+    await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Repository" WHERE id = ${candidate.id} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Application" WHERE "repositoryId" = ${candidate.id} FOR UPDATE`;
+    const repo = await tx.repository.findUnique({ where: { id: candidate.id }, include: { application: true } });
+    if (!repo) return;
     // Idempotent upsert on (repositoryId, recordedDay): same UTC day → same row
     // replaced. The denormalised recordedDay column exists specifically so this is a
     // typed Prisma upsert, not a delete-then-create dance (delete+create would not
     // be atomic against a concurrent snapshot run and could lose counts).
     const recordedDay = new Date(Date.UTC(todayUtc.getUTCFullYear(), todayUtc.getUTCMonth(), todayUtc.getUTCDate()));
-    await prisma.metricSnapshot.upsert({
+    await tx.metricSnapshot.upsert({
       where: {
         repositoryId_recordedDay: {
           repositoryId: repo.id,
@@ -61,11 +66,10 @@ export async function runSnapshot(clock: Clock = realClock): Promise<void> {
       },
     });
 
-    if (!repo.application) continue;
+    if (!repo.application) return;
 
-    const { starsGained, source: starsGainedSource } = await computeStarsGained30d(repo.id, repo.stars, clock.now());
+    const { starsGained } = await computeStarsGained30d(repo.id, repo.stars, clock.now(), tx);
     const starsGained30d = starsGained;
-    const overrides = (repo.application.manualOverrides as Record<string, boolean> | null) ?? {};
 
     const scores = computeScores({
       pushedAt: repo.pushedAt,
@@ -98,27 +102,11 @@ export async function runSnapshot(clock: Clock = realClock): Promise<void> {
       unreachable: repo.unreachable,
     });
 
-    // scoreUpdate does the column-name remapping (breakdown → scoreBreakdown, etc.)
-    // and stamps scoreComputedAt; spreading its result gives us a verified-by-types
-    // payload that can't silently write wrong names. Adding verificationStatus and
-    // growthScoreSource last keeps those two outside the override-protection strip
-    // below — the admin UI doesn't expose them, so flagging them manually would be
-    // noise, and silently dropping them on every run would erase provenance.
-    const update: Record<string, unknown> = {
-      ...scoreUpdate(scores),
-      verificationStatus,
-      // Stash whether growth is real or "not enough history" so the UI can label
-      // consistently without re-deriving.
-      growthScoreSource: starsGainedSource,
-    };
-    // Apply manual overrides AFTER all derived fields are merged in. If a score column
-    // is in manualOverrides, the admin's value stands. Breakdown travels with the score
-    // so it follows the same rule.
-    for (const key of [...SCORE_FIELDS, 'verificationStatus', 'growthScoreSource']) {
-      if (overrides[key]) delete update[key];
-    }
-
-    await prisma.application.update({ where: { id: repo.application.id }, data: update as never });
+    const update = applyManualOverrides({
+      ...scoreUpdate(scores, starsGained30d, clock.now()), verificationStatus,
+    }, repo.application);
+    await tx.application.update({ where: { id: repo.application.id }, data: update as never });
+    });
   }
 
   console.log('[snapshot] done');

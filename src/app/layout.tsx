@@ -1,3 +1,4 @@
+import { SuggestAppLink } from '@/components/ReportLinks';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import './globals.css';
@@ -105,6 +106,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/sitemap.xml" className="underline">sitemap</Link>
             <a href="https://github.com/alexguidioff/selfhostfind" className="underline" rel="noreferrer">GitHub</a>
           </p>
+          <div className="mt-3">
+            <SuggestAppLink />
+            <p className="text-xs mt-2">Suggestions and corrections are public GitHub issues. A GitHub account is required.</p>
+          </div>
         </footer>
       </body>
     </html>

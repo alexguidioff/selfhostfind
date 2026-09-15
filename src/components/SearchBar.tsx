@@ -10,18 +10,10 @@ import { useEffect, useState } from 'react';
 // resolved at build time and shipped in the bundle.
 const SEARCH_LOG_ENABLED = process.env.NEXT_PUBLIC_SEARCH_LOG_ENABLED === 'true';
 
-// Whitelisted page contexts. The catalog uses these to bucket "this user searched from
-// the alternatives list" vs "from the home grid" so the admin view can tell a global
-// gap apart from a niche local one. Anything else falls back to 'other' to keep the
-// signature space small and the stored values safe.
-type SearchContext = 'home' | 'category' | 'alternatives' | 'app' | 'other';
-const ALLOWED_CONTEXTS: ReadonlySet<SearchContext> = new Set(['home', 'category', 'alternatives', 'app', 'other']);
-function detectContext(pathname: string): SearchContext {
-  if (pathname === '/' || pathname === '') return 'home';
-  if (pathname.startsWith('/apps/')) return 'app';
-  if (pathname.startsWith('/category/')) return 'category';
-  if (pathname.startsWith('/alternatives')) return 'alternatives';
-  return 'other';
+function detectContext(pathname: string): string {
+  if (pathname === '/') return 'home';
+  const match = pathname.match(/^\/(category|alternatives)\/([a-z0-9-]+)\/?$/);
+  return match ? `${match[1]}:${match[2]}` : 'other';
 }
 
 export function SearchBar() {
@@ -45,7 +37,7 @@ export function SearchBar() {
       const body = JSON.stringify({
         q: trimmed,
         filters: filterParams(params),
-        context: ALLOWED_CONTEXTS.has(context) ? context : 'other',
+        context,
       });
       // Fire-and-forget: navigation must not wait for logging. The server still
       // re-validates everything; this is just a hint about intent.
@@ -74,8 +66,7 @@ export function SearchBar() {
         <p className="mt-1 text-[11px] text-slate-500">
           Every search you submit is recorded (not just no-result ones) as a daily
           aggregate. We don&apos;t record your IP, user agent, cookies, or session id.
-          Aggregates are kept for 30 days. Drop the SEARCH_LOG_ENABLED env var to turn
-          this off.
+          Aggregates are kept for 30 days. Please avoid personal or sensitive information.
         </p>
       )}
     </form>
@@ -85,7 +76,7 @@ export function SearchBar() {
 // Returns just the filters the search-log API cares about. Whitelisting here avoids
 // accidentally including ?sort= or ?page= in the stored signature — those don't change
 // what's in the catalog, only how results are ordered, so they aren't a signal.
-const LOGGED_FILTER_KEYS = ['category', 'docker', 'compose', 'arm64', 'nas', 'verified', 'database', 'minStars', 'updated'];
+const LOGGED_FILTER_KEYS = ['category', 'docker', 'compose', 'arm64', 'nas', 'verified', 'database', 'minStars', 'updated', 'sort'];
 function filterParams(params: URLSearchParams): Record<string, string> {
   const out: Record<string, string> = {};
   for (const key of LOGGED_FILTER_KEYS) {

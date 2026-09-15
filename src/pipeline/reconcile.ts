@@ -14,9 +14,10 @@ import { prisma } from '@/lib/db';
 import { getRepositoryById, type RepositoryLookupResult } from '@/lib/github';
 import { sendAlert, pingHeartbeat } from '@/lib/alerts';
 import { runWithConcurrency } from './concurrency';
+import { positiveInt } from './refresh.args';
 
-const CONCURRENCY = Number(process.env.RECONCILE_CONCURRENCY ?? 5);
-const SCAN_RETENTION_DAYS = Number(process.env.SCAN_RETENTION_DAYS ?? 90);
+const CONCURRENCY = positiveInt(process.env.RECONCILE_CONCURRENCY, 5);
+const SCAN_RETENTION_DAYS = positiveInt(process.env.SCAN_RETENTION_DAYS, 90);
 
 export interface ReconciliationInput {
   currentFullName: string;

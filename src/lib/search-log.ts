@@ -12,9 +12,13 @@
 import { prisma } from '@/lib/db';
 import { normalizeSearch, type SearchParams } from '@/lib/query';
 import { getCatalogPage } from '@/lib/catalog';
+import { getAlternativeProducts } from '@/lib/alternatives';
+import { slugify } from '@/lib/slug';
+import { positiveInt } from '@/pipeline/refresh.args';
+import type { Prisma } from '@prisma/client';
 
 const MAX_QUERY_LENGTH = 100;
-const SEARCH_LOGS_PER_MINUTE = Number(process.env.SEARCH_LOG_RATE_PER_MINUTE ?? 60);
+const SEARCH_LOGS_PER_MINUTE = positiveInt(process.env.SEARCH_LOG_RATE_PER_MINUTE, 60);
 
 // In-memory sliding-window rate limit, scoped to the server process. Conservative
 // because the plan asks for "a global conservative write limit per minute, without
@@ -38,6 +42,8 @@ function underRateLimit(now: number): boolean {
 // (legitimate words containing these patterns) are accepted as a cost of the safer
 // default.
 const DROP_PATTERNS: RegExp[] = [
+  /(?:github_pat_|sk-(?:proj-|svcacct-)?)[A-Za-z0-9_-]{12,}/i,
+  /(?:^|\s)(?:[A-Z]:\\|~?\/)[^\s]+/i,
   /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i,                                         // email
   /https?:\/\/[^\s<>"']+/i,                                                          // URL anywhere
   /(?:^|\s)\/[a-z0-9._-]+(?:\/[a-z0-9._-]+){2,}/i,                                  // absolute-ish path
@@ -69,18 +75,19 @@ import { CATEGORIES } from '@/lib/constants';
 const CATEGORY_SET = new Set<string>(CATEGORIES);
 
 const ALLOWED_FILTER_KEYS = new Set([
-  'category', 'docker', 'compose', 'arm64', 'nas', 'verified', 'database', 'minStars', 'updated',
+  'category', 'docker', 'compose', 'arm64', 'nas', 'verified', 'database', 'minStars', 'updated', 'sort',
 ]);
 
 export function validateFilterValue(key: string, value: string): boolean {
   if (!ALLOWED_FILTER_KEYS.has(key)) return false;
   switch (key) {
+    case 'sort': return value === 'trending';
     case 'category': return CATEGORY_SET.has(value);
     case 'docker': case 'compose': case 'arm64': case 'nas': return value === '1';
     case 'verified': return value === '0' || value === '1';
-    case 'database': return value === 'none' || /^[A-Za-z][A-Za-z0-9 -]{0,30}$/.test(value);
+    case 'database': return ['none', 'SQLite', 'PostgreSQL', 'MySQL', 'MariaDB', 'MongoDB', 'Redis'].includes(value);
     case 'minStars': return /^\d{1,9}$/.test(value);
-    case 'updated': return /^\d{1,5}$/.test(value);
+    case 'updated': return /^\d{1,5}$/.test(value) && Number(value) > 0 && Number(value) <= 36500;
     default: return false;
   }
 }
@@ -128,11 +135,20 @@ export interface LogOutcome {
   reason?: string;
 }
 
-const ALLOWED_CONTEXTS_FOR_LOG = new Set(['home', 'category', 'alternatives', 'app', 'other']);
-
-function validateContext(value: unknown): string {
-  if (typeof value !== 'string') return 'other';
-  return ALLOWED_CONTEXTS_FOR_LOG.has(value) ? value : 'other';
+async function searchScope(context: string): Promise<Prisma.ApplicationWhereInput | null> {
+  if (context === 'home') return {};
+  if (context.length > 150) return null;
+  const [kind, slug] = context.split(':');
+  if (!slug || !/^[a-z0-9-]+$/.test(slug) || context !== `${kind}:${slug}`) return null;
+  if (kind === 'category') {
+    const category = CATEGORIES.find(c => slugify(c) === slug);
+    return category ? { category } : null;
+  }
+  if (kind === 'alternatives') {
+    const product = (await getAlternativeProducts()).find(p => p.slug === slug);
+    return product ? { alternativesTo: { hasSome: product.names } } : null;
+  }
+  return null;
 }
 
 // Returns true if the row was inserted/updated. Failures are swallowed and logged as a
@@ -150,22 +166,24 @@ export async function recordSearch({ query, params, context }: LogInput): Promis
   if (!underRateLimit(now)) return { recorded: false, reason: 'rate-limited' };
 
   const signature = filterSignature(params);
-  const safeContext = validateContext(context);
+  const safeContext = context ?? 'home';
   const dayUtc = startOfUtcDay(new Date(now));
 
   try {
     // Server-side count: re-run the same query the catalog would. This is the only way
     // the "zero result" classification can be honest: trusting the client would let any
     // bot lie about being stuck.
+    const scope = await searchScope(safeContext);
+    if (!scope) return { recorded: false, reason: 'invalid-context' };
     const catalogParams: SearchParams = { q: normalized };
-    const category = strParam(params, 'category'); if (category) catalogParams.category = category;
-    const database = strParam(params, 'database'); if (database) catalogParams.database = database;
-    const minStars = strParam(params, 'minStars'); if (minStars) catalogParams.minStars = minStars;
-    const updated = strParam(params, 'updated'); if (updated) catalogParams.updated = updated;
-    for (const flag of ['docker', 'compose', 'arm64', 'nas', 'verified'] as const) {
-      if (strParam(params, flag) === '1') catalogParams[flag] = '1';
+    for (const key of ALLOWED_FILTER_KEYS) {
+      const value = strParam(params, key);
+      if (!value) continue;
+      if (key === 'sort' && value !== 'trending') continue;
+      if (!validateFilterValue(key, value)) return { recorded: false, reason: 'invalid-filter' };
+      catalogParams[key] = value;
     }
-    const page = await getCatalogPage(catalogParams);
+    const page = await getCatalogPage(catalogParams, scope);
     const zeroResult = page.total === 0;
 
     // Atomic increment: $queryRaw with ON CONFLICT keeps both counters consistent even
@@ -187,7 +205,7 @@ export async function recordSearch({ query, params, context }: LogInput): Promis
     `;
     return { recorded: true };
   } catch (err) {
-    console.warn('[search-log] failed to record:', err instanceof Error ? err.message : err);
+    console.warn('[search-log] failed to record'); // Never log a query or Prisma payload.
     return { recorded: false, reason: 'error' };
   }
 }

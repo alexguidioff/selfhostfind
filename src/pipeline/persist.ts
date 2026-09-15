@@ -5,6 +5,7 @@
 //
 // Network calls stay in the caller; this module only builds Prisma payloads.
 
+import { Prisma } from '@prisma/client';
 import type { ClassificationOutput } from '@/lib/classification';
 import { classificationFields } from '@/lib/classification';
 import { computeScores } from '@/lib/scoring';
@@ -59,37 +60,16 @@ export function repoItemFromSearch(item: GhRepoSearchItem, id: string): RepoItem
   };
 }
 
-export function applyRepoItemDelta(existing: RepoItem, item: GhRepoSearchItem): Partial<RepoItem> {
-  return {
-    name: item.name,
-    fullName: item.full_name,
-    description: item.description,
-    repositoryUrl: item.html_url,
-    homepageUrl: item.homepage || null,
-    stars: item.stargazers_count,
-    forks: item.forks_count,
-    watchers: item.watchers_count,
-    openIssues: item.open_issues_count,
-    license: item.license?.spdx_id ?? null,
-    primaryLanguage: item.language,
-    topics: item.topics,
-    pushedAt: new Date(item.pushed_at),
-    archived: item.archived,
-    fork: item.fork,
-    defaultBranch: item.default_branch,
-  };
-}
-
 // Maps a ScoringOutput (the in-memory shape returned by computeScores) onto the
 // persisted Application column names. Centralised so discovery, refresh, and snapshot
 // can't drift apart on what gets written where.
 export const SCORE_FIELDS = [
   'healthScore', 'activityScore', 'documentationScore', 'installEaseScore',
   'nasCompatibilityScore', 'dockerScore', 'popularityScore', 'growthScore',
-  'scoreBreakdown', 'scoreAlgorithmVersion', 'scoreComputedAt',
+  'scoreBreakdown', 'scoreAlgorithmVersion', 'scoreComputedAt', 'growthScoreSource',
 ] as const;
 
-export function scoreUpdate(scores: ReturnType<typeof computeScores>): Record<string, unknown> {
+export function scoreUpdate(scores: ReturnType<typeof computeScores>, starsGained: number | null, now = new Date()): Record<string, unknown> {
   const { breakdown, algorithmVersion, ...scalars } = scores;
   // Renames: ScoringOutput's `breakdown`/`algorithmVersion` map to the DB columns
   // `scoreBreakdown`/`scoreAlgorithmVersion`. Done here so callers don't sprinkle the
@@ -98,7 +78,8 @@ export function scoreUpdate(scores: ReturnType<typeof computeScores>): Record<st
     ...scalars,
     scoreBreakdown: breakdown,
     scoreAlgorithmVersion: algorithmVersion,
-    scoreComputedAt: new Date(),
+    scoreComputedAt: now,
+    growthScoreSource: starsGained === null ? 'insufficient-history' : 'computed',
   };
 }
 
@@ -197,7 +178,7 @@ export function buildApplicationUpdate(args: {
   return applyManualOverrides(proposed, existingApplication);
 }
 
-export async function uniqueSlug(prisma: import('@prisma/client').PrismaClient, name: string): Promise<string> {
+export async function uniqueSlug(prisma: Prisma.TransactionClient, name: string): Promise<string> {
   const base = slugify(name) || 'app';
   let slug = base;
   let n = 1;
@@ -206,4 +187,17 @@ export async function uniqueSlug(prisma: import('@prisma/client').PrismaClient, 
     slug = `${base}-${n}`;
   }
   return slug;
+}
+
+export function repositoryData(repo: RepoItem, analysis: AnalysisOutcome): Prisma.RepositoryUpdateManyMutationInput {
+  return {
+    owner: repo.fullName.split('/')[0], name: repo.name, fullName: repo.fullName,
+    repositoryUrl: repo.repositoryUrl, description: repo.description, homepageUrl: repo.homepageUrl,
+    stars: repo.stars, forks: repo.forks, watchers: repo.watchers, openIssues: repo.openIssues,
+    license: repo.license, primaryLanguage: repo.primaryLanguage, topics: repo.topics,
+    pushedAt: repo.pushedAt, archived: repo.archived, fork: repo.fork, defaultBranch: repo.defaultBranch,
+    readmeExcerpt: analysis.result.readmeExcerpt, languages: analysis.result.languages ?? Prisma.DbNull,
+    latestReleaseAt: analysis.result.latestReleaseAt, latestReleaseTag: analysis.result.latestReleaseTag,
+    unreachable: false, lastVerifiedAt: new Date(), lastScannedAt: new Date(), lastScanAttemptAt: new Date(), lastScanError: null,
+  };
 }

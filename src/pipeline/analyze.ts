@@ -143,7 +143,7 @@ export async function analyzeRepository(
   for (const directory of directories) {
     const children = await getRootContents(owner, repo, directory.name);
     if (children.kind !== 'ok') {
-      diagnostics.contentsStatus = children.kind;
+      if (diagnostics.contentsStatus === 'ok' || diagnostics.contentsStatus === 'not_found') diagnostics.contentsStatus = children.kind;
       continue;
     }
     for (const file of children.value) {
@@ -202,4 +202,9 @@ export async function analyzeRepository(
       languages: languages.kind === 'ok' ? languages.value : null,
     },
   };
+}
+
+export function assertCompleteAnalysis(analysis: AnalysisOutcome): void {
+  const failed = Object.entries(analysis.diagnostics).filter(([, status]) => status !== 'ok' && status !== 'not_found');
+  if (failed.length) throw new Error(`Incomplete GitHub analysis: ${failed.map(([field, status]) => `${field}=${status}`).join(', ')}`);
 }
