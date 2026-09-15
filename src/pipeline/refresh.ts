@@ -26,6 +26,7 @@ import { analyzeRepository, type AnalysisOutcome } from './analyze';
 import { classify } from '@/lib/classification';
 import { buildApplicationUpdate, buildScores, scoreUpdate, SCORE_FIELDS, type RepoItem } from './persist';
 import { computeStarsGained30d } from './stars-since';
+import { buildPreserveMap, hasTransientFailure } from '@/lib/analysis-merge';
 import { runWithConcurrency } from './concurrency';
 import { sendAlert, pingHeartbeat } from '@/lib/alerts';
 import {
@@ -88,141 +89,233 @@ interface RefreshOutcome {
 }
 
 async function refreshOne(repo: { id: string; githubId: bigint; fullName: string }, dryRun: boolean): Promise<RefreshOutcome> {
-  const claim = await tryClaim(prisma, repo.id);
-  if (!claim) {
-    return { repo: repo.fullName, status: 'skipped', reason: 'claim held by another worker' };
+  // --dry-run takes the same path up to GitHub I/O, then bails before any write — no
+  // tryClaim, no release, no heartbeat, no lastScanAttemptAt stamp. That's how a
+  // preview should behave: completely side-effect-free.
+  if (!dryRun) {
+    const claim = await tryClaim(prisma, repo.id);
+    if (!claim) {
+      return { repo: repo.fullName, status: 'skipped', reason: 'claim held by another worker' };
+    }
+    return refreshWithClaim(repo, claim.expiresAt);
   }
+  return refreshPreview(repo);
+}
+
+interface ClaimHandle { workerId: string; expiresAt: Date; }
+
+async function refreshPreview(repo: { id: string; githubId: bigint; fullName: string }): Promise<RefreshOutcome> {
+  // Preview path: read-only GitHub call, no DB writes, no claim.
   try {
     const lookup = await getRepositoryById(repo.githubId);
-    if (!lookup.found) {
-      if (!dryRun) {
-        await updateIfOwner(prisma, repo.id, {
-          unreachable: true, lastVerifiedAt: new Date(), lastScanAttemptAt: new Date(),
-        });
-      }
-      return { repo: repo.fullName, status: 'updated', reason: 'unreachable' };
-    }
-
-    // Long analyses: keep the claim alive. Renew once per minute to a fresh TTL.
-    const renewalHandle = setInterval(() => { void renew(prisma, repo.id); }, 60_000);
-
-    try {
-      const existing = await prisma.repository.findUniqueOrThrow({
-        where: { id: repo.id },
-        include: { application: true },
-      });
-
-      const item = lookup.repo;
-      // Use the freshly-fetched GitHub stars, not the DB row. The old code used
-      // existing.stars, which meant the growth delta was computed against stale data
-      // whenever the user looked at the catalog between runs. This is the delta we want.
-      const { starsGained: starsGained30d } = await computeStarsGained30d(repo.id, item.stargazers_count);
-
-      const analysis = await analyzeRepository(item.owner.login, item.name, item.default_branch);
-      const classification = classify({
-        name: item.name,
-        description: item.description ?? '',
-        readme: analysis.result.readmeFull ?? '',
-        topics: item.topics,
-      });
-
-      const repoItem: RepoItem = {
-        id: repo.id,
-        githubId: repo.githubId,
-        name: item.name,
-        fullName: item.full_name,
-        description: item.description,
-        repositoryUrl: item.html_url,
-        homepageUrl: item.homepage || null,
-        stars: item.stargazers_count,
-        forks: item.forks_count,
-        watchers: item.watchers_count,
-        openIssues: item.open_issues_count,
-        license: item.license?.spdx_id ?? null,
-        primaryLanguage: item.language,
-        topics: item.topics,
-        createdAt: existing.createdAt,
-        pushedAt: new Date(item.pushed_at),
-        archived: item.archived,
-        fork: item.fork,
-        defaultBranch: item.default_branch,
-      };
-
-      const scores = buildScores({ repo: repoItem, analysis, classification, starsGained30d });
-
-      if (!existing.application) {
-        if (dryRun) {
-          return { repo: repo.fullName, status: 'preview', reason: 'no application row yet' };
-        }
-        await insertNewApplication({ repo: repoItem, analysis, classification, scores });
-      } else {
-        const update = buildApplicationUpdate({
-          repo: repoItem,
-          analysis,
-          classification,
-          existingApplication: existing.application,
-        });
-        // Merge scores via the central scoreUpdate mapping (renames breakdown/
-        // algorithmVersion to their persisted column names, stamps scoreComputedAt).
-        // Going through Object.entries(scores) directly would write `breakdown` and
-        // `algorithmVersion` — columns that don't exist on Application — silently
-        // swallowed by `as never`.
-        for (const [k, v] of Object.entries(scoreUpdate(scores))) update[k] = v;
-        // Strip any score column the admin marked as manual; the breakdown travels
-        // with the score, so it goes manual too.
-        for (const key of SCORE_FIELDS) {
-          const overrideFlags = (existing.application.manualOverrides as Record<string, boolean> | null) ?? {};
-          if (overrideFlags[key]) delete update[key];
-        }
-
-        if (dryRun) {
-          return {
-            repo: repo.fullName, status: 'preview',
-            reason: `health=${scores.healthScore}, docker=${update.dockerSupported}, license=${repoItem.license ?? 'unknown'}`,
-          };
-        }
-
-        // Two writes, both verified through the claim. Repository first (so the foreign
-        // key is fine), then Application. If the second fails or we lose the claim,
-        // Repository still got its metadata refresh — better than half-applying nothing.
-        await updateIfOwner(prisma, repo.id, {
-          description: repoItem.description,
-          homepageUrl: repoItem.homepageUrl,
-          stars: repoItem.stars,
-          forks: repoItem.forks,
-          watchers: repoItem.watchers,
-          openIssues: repoItem.openIssues,
-          license: repoItem.license,
-          primaryLanguage: repoItem.primaryLanguage,
-          topics: repoItem.topics,
-          pushedAt: repoItem.pushedAt,
-          latestReleaseAt: analysis.result.latestReleaseAt,
-          latestReleaseTag: analysis.result.latestReleaseTag,
-          archived: repoItem.archived,
-          unreachable: false,
-          lastVerifiedAt: new Date(),
-          lastScannedAt: new Date(),
-          lastScanAttemptAt: new Date(),
-          lastScanError: null,
-        });
-
-        await applicationUpdateIfOwner(prisma, existing.application.id, existing.id, update);
-      }
-
-      return { repo: repo.fullName, status: 'updated', reason: `health=${scores.healthScore}` };
-    } finally {
-      clearInterval(renewalHandle);
-      await release(prisma, repo.id);
-    }
+    if (!lookup.found) return { repo: repo.fullName, status: 'preview', reason: 'unreachable' };
+    const existing = await prisma.repository.findUniqueOrThrow({ where: { id: repo.id }, include: { application: true } });
+    const item = lookup.repo;
+    const { starsGained: starsGained30d } = await computeStarsGained30d(repo.id, item.stargazers_count);
+    const analysis = await analyzeRepository(item.owner.login, item.name, item.default_branch);
+    const classification = classify({
+      name: item.name, description: item.description ?? '',
+      readme: analysis.result.readmeFull ?? '', topics: item.topics,
+    });
+    const repoItem: RepoItem = { id: repo.id, githubId: repo.githubId,
+      name: item.name, fullName: item.full_name, description: item.description,
+      repositoryUrl: item.html_url, homepageUrl: item.homepage || null,
+      stars: item.stargazers_count, forks: item.forks_count, watchers: item.watchers_count,
+      openIssues: item.open_issues_count, license: item.license?.spdx_id ?? null,
+      primaryLanguage: item.language, topics: item.topics,
+      createdAt: existing.createdAt, pushedAt: new Date(item.pushed_at),
+      archived: item.archived, fork: item.fork, defaultBranch: item.default_branch,
+    };
+    const scores = buildScores({ repo: repoItem, analysis, classification, starsGained30d });
+    return { repo: repo.fullName, status: 'preview',
+      reason: `health=${scores.healthScore}, docker=${analysis.result.dockerfilePresent || analysis.result.composePresent}, license=${repoItem.license ?? 'unknown'}` };
   } catch (err) {
-    if (!dryRun) {
-      await updateIfOwner(prisma, repo.id, {
-        lastScanAttemptAt: new Date(),
-        lastScanError: String(err instanceof Error ? err.message : err).slice(0, 500),
-      });
-    }
-    return { repo: repo.fullName, status: 'error', reason: String(err instanceof Error ? err.message : err) };
+    return { repo: repo.fullName, status: 'preview', reason: String(err instanceof Error ? err.message : err) };
   }
+}
+
+// Single-flight write path. Outer try/finally owns the claim lifetime: the inner code
+// can throw freely (network, Prisma, classification, anything) and the claim still gets
+// released in one place. Errors that need to be recorded on the row go through
+// recordScanError, which itself uses updateIfOwner — and it works because we haven't
+// released the claim yet.
+async function refreshWithClaim(
+  repo: { id: string; githubId: bigint; fullName: string },
+  initialExpiresAt: Date
+): Promise<RefreshOutcome> {
+  // Renewal timer: keeps the claim alive for long analyses. Renewed TTL must outlive
+  // the next renewal interval; we use ttl/2 (default 5min) so a single missed renewal
+  // still leaves us safe.
+  const ttlMs = Math.max(60_000, Number(process.env.REFRESH_CLAIM_TTL_MS ?? 10 * 60 * 1000));
+  const renewal = setInterval(() => { void renew(prisma, repo.id, ttlMs); }, Math.max(30_000, Math.floor(ttlMs / 2)));
+
+  try {
+    const result = await performRefresh(repo, initialExpiresAt);
+    return result;
+  } catch (err) {
+    // Record the failure for the next operator to see. Best-effort: if recording fails
+    // too, the row just keeps its previous lastScanError.
+    await recordScanError(repo.id, err).catch(() => undefined);
+    return { repo: repo.fullName, status: 'error', reason: String(err instanceof Error ? err.message : err) };
+  } finally {
+    clearInterval(renewal);
+    // Release happens LAST, after both the happy path and the error-recording write
+    // are done — earlier the inner finally released before the catch could write, so
+    // updateIfOwner on the error path was silently no-oping against an unclaimed row.
+    await release(prisma, repo.id);
+  }
+}
+
+async function performRefresh(
+  repo: { id: string; githubId: bigint; fullName: string },
+  initialExpiresAt: Date
+): Promise<RefreshOutcome> {
+  const lookup = await getRepositoryById(repo.githubId);
+  if (!lookup.found) {
+    // Permanent disappearance: mark unreachable and clear the field that depends on a
+    // live repo. Done in a single transaction with the claim check.
+    const rows = await prisma.$transaction(async (tx) => {
+      const r = await tx.repository.updateMany({
+        where: { id: repo.id, scanClaimExpiresAt: { gt: new Date() } },
+        data: {
+          unreachable: true, lastVerifiedAt: new Date(),
+          lastScanAttemptAt: new Date(), lastScanError: null,
+          // Clear evidence that required a live repo. Names that came from the file
+          // listing or README stay: the repo may come back under the same owner/name.
+          latestReleaseAt: null, latestReleaseTag: null,
+        },
+      });
+      return { repoUpdated: r.count };
+    });
+    if (rows.repoUpdated === 0) {
+      throw new Error('claim lost before unreachable update could commit');
+    }
+    return { repo: repo.fullName, status: 'updated', reason: 'unreachable' };
+  }
+
+  const existing = await prisma.repository.findUniqueOrThrow({
+    where: { id: repo.id }, include: { application: true },
+  });
+
+  // Identity check after a possible rename. GitHub's immutable ID lookup returns the
+  // current owner/name; if they don't match what we previously stored, it could be a
+  // rename OR a different project that somehow got this numeric ID (extreme edge case
+  // but happens when a deleted repo's ID is reused). Refuse to overwrite the row with
+  // conflicting metadata; require a human to reconcile.
+  const item = lookup.repo;
+  if (existing.fullName !== item.full_name && existing.githubId === BigInt(item.id)) {
+    console.warn(`[refresh] ${repo.fullName}: rename detected ${existing.fullName} -> ${item.full_name}, skipping metadata overwrite`);
+    await recordScanError(repo.id, new Error(`rename: ${existing.fullName} -> ${item.full_name}`));
+    return { repo: repo.fullName, status: 'skipped', reason: `renamed to ${item.full_name}, manual reconcile required` };
+  }
+
+  const { starsGained: starsGained30d } = await computeStarsGained30d(repo.id, item.stargazers_count);
+
+  const analysis = await analyzeRepository(item.owner.login, item.name, item.default_branch);
+  const classification = classify({
+    name: item.name,
+    description: item.description ?? '',
+    readme: analysis.result.readmeFull ?? '',
+    topics: item.topics,
+  });
+
+  // On a transient GitHub failure during classification inputs, refuse to write the
+  // possibly-wrong negative classification: the row stays as-is, the error is recorded.
+  if (!classification.isSelfHostedApp && hasTransientFailure(analysis.diagnostics)) {
+    throw new Error(`transient GitHub failure during classify: ${analysis.diagnostics.readmeStatus}/${analysis.diagnostics.contentsStatus}`);
+  }
+
+  const repoItem: RepoItem = {
+    id: repo.id, githubId: repo.githubId,
+    name: item.name, fullName: item.full_name, description: item.description,
+    repositoryUrl: item.html_url, homepageUrl: item.homepage || null,
+    stars: item.stargazers_count, forks: item.forks_count, watchers: item.watchers_count,
+    openIssues: item.open_issues_count, license: item.license?.spdx_id ?? null,
+    primaryLanguage: item.language, topics: item.topics,
+    createdAt: existing.createdAt, pushedAt: new Date(item.pushed_at),
+    archived: item.archived, fork: item.fork, defaultBranch: item.default_branch,
+  };
+
+  const scores = buildScores({ repo: repoItem, analysis, classification, starsGained30d });
+  const preserve = buildPreserveMap(analysis.diagnostics);
+
+  if (!existing.application) {
+    await insertNewApplication({ repo: repoItem, analysis, classification, scores });
+    return { repo: repo.fullName, status: 'updated', reason: `health=${scores.healthScore} (new)` };
+  }
+
+  const update = buildApplicationUpdate({
+    repo: repoItem, analysis, classification,
+    existingApplication: existing.application,
+  });
+  // Per-field preservation: keep the existing value of any field whose fetch failed.
+  // Manual overrides always win — even if a fetch succeeded, an admin-marked field is
+  // not touched.
+  const overrides = (existing.application.manualOverrides as Record<string, boolean> | null) ?? {};
+  for (const [field, status] of Object.entries(preserve)) {
+    if (status === 'preserved-stale' && !overrides[field]) {
+      const existingValue = (existing.application as unknown as Record<string, unknown>)[field];
+      if (existingValue !== null && existingValue !== undefined &&
+          !(Array.isArray(existingValue) && existingValue.length === 0)) {
+        update[field] = existingValue;
+      }
+    }
+  }
+  // Merge scores via scoreUpdate (renames breakdown → scoreBreakdown, etc.).
+  for (const [k, v] of Object.entries(scoreUpdate(scores))) update[k] = v;
+  for (const key of SCORE_FIELDS) {
+    if (overrides[key]) delete update[key];
+  }
+
+  // Single transaction that writes Repository + Application with a claim guard.
+  // The claim guard on both updateMany calls is redundant when they're inside one
+  // transaction, but the inner Prisma updateMany calls don't know about the claim —
+  // we use the WHERE clause to filter by a still-valid claim as the contract.
+  const now = new Date();
+  const txRows = await prisma.$transaction(async (tx) => {
+    const repoUpdate = await tx.repository.updateMany({
+      where: { id: repo.id, scanClaimExpiresAt: { gt: now } },
+      data: {
+        description: repoItem.description,
+        homepageUrl: repoItem.homepageUrl,
+        stars: repoItem.stars, forks: repoItem.forks, watchers: repoItem.watchers,
+        openIssues: repoItem.openIssues, license: repoItem.license,
+        primaryLanguage: repoItem.primaryLanguage, topics: repoItem.topics,
+        pushedAt: repoItem.pushedAt,
+        latestReleaseAt: analysis.result.latestReleaseAt,
+        latestReleaseTag: analysis.result.latestReleaseTag,
+        archived: repoItem.archived,
+        // Pull the README excerpt, languages, and defaultBranch forward — the old code
+        // did not, so a refreshed row could end up with stale README content even when
+        // we just successfully fetched it.
+        defaultBranch: repoItem.defaultBranch,
+        languages: analysis.result.languages ?? undefined,
+        readmeExcerpt: analysis.result.readmeExcerpt,
+        unreachable: false,
+        lastVerifiedAt: now,
+        lastScannedAt: now,
+        lastScanAttemptAt: now,
+        lastScanError: null,
+        discoverySource: { push: repoItem.fullName }, // provenance kept; refresh just touches
+      },
+    });
+    const appUpdate = await tx.application.updateMany({
+      where: { id: existing.application!.id, repositoryId: repo.id, repository: { scanClaimExpiresAt: { gt: now } } },
+      data: update,
+    });
+    return { repoUpdated: repoUpdate.count, appUpdated: appUpdate.count };
+  });
+  if (txRows.repoUpdated === 0 || txRows.appUpdated === 0) {
+    throw new Error('claim lost mid-transaction (race with another worker)');
+  }
+  return { repo: repo.fullName, status: 'updated', reason: `health=${scores.healthScore}` };
+}
+
+async function recordScanError(repositoryId: string, err: unknown): Promise<void> {
+  await updateIfOwner(prisma, repositoryId, {
+    lastScanAttemptAt: new Date(),
+    lastScanError: String(err instanceof Error ? err.message : err).slice(0, 500),
+  });
 }
 
 // starsGained30d lives in ./stars-since.ts; refresh uses that shared helper so the

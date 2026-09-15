@@ -1,93 +1,102 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import { tryClaim, renew, release, updateIfOwner, currentWorkerId } from '@/pipeline/claim';
 
-// Uses an in-memory SQLite via Prisma's createEngine so we don't need a running Postgres.
-// The Prisma client generated against the real schema includes Postgres-specific types in
-// @db.*, but the queries we run here are plain string operations, which Prisma translates
-// for any provider. We bypass the real DATABASE_URL by passing a per-test override.
-function makeClient(): PrismaClient {
-  return new PrismaClient({ datasourceUrl: 'file::memory:?cache=shared' });
-}
+// Integration test: requires a real Postgres with the project's schema migrated.
+// The CI suite runs with TEST_DATABASE_URL pointing at a throwaway database
+// (see .github/workflows/ci.yml), so the claim mechanism gets exercised against
+// the real Postgres semantics (timestamp comparison, atomic UPDATE, RETURNING count).
+// Prisma's typed API is used end-to-end so we don't drift from what the pipeline does.
 
-describe('scan claim', () => {
+const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
+
+const skipUnless = TEST_DATABASE_URL ? describe : describe.skip;
+
+skipUnless('scan claim', () => {
   let prisma: PrismaClient;
   let repoId: string;
 
+  beforeAll(async () => {
+    if (!TEST_DATABASE_URL) throw new Error('TEST_DATABASE_URL is required for claim.test.ts');
+    prisma = new PrismaClient({ datasourceUrl: TEST_DATABASE_URL });
+  });
+
+  afterAll(async () => {
+    if (prisma) await prisma.$disconnect();
+  });
+
   beforeEach(async () => {
-    prisma = makeClient();
-    // SQLite in-memory doesn't have the Postgres schema. We only need the scanClaim fields,
-    // and the migration we ship is the source of truth; here we just exercise the Prisma
-    // query shape against a real Postgres-compatible instance. Skip when DATABASE_URL is
-    // unavailable to keep the unit suite hermetic — the integration suite covers this.
-    if (!process.env.DATABASE_URL) return;
-    await prisma.$executeRawUnsafe('DROP TABLE IF EXISTS "RepositoryClaimTest"');
-    await prisma.$executeRawUnsafe(
-      'CREATE TABLE "RepositoryClaimTest" (id TEXT PRIMARY KEY, name TEXT NOT NULL, "scanClaimId" TEXT, "scanClaimExpiresAt" TIMESTAMP, "scanClaimWorkerId" TEXT)'
-    );
-    const row = await prisma.$executeRawUnsafe(
-      'INSERT INTO "RepositoryClaimTest" (id, name) VALUES ($1, $2) RETURNING id',
-      'repo-1', 'owner/name'
-    );
-    repoId = 'repo-1';
+    if (!TEST_DATABASE_URL) return;
+    // Create a fresh isolated Repository row with no claim. We don't reuse names
+    // because the unique constraint on fullName could collide across test runs.
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const row = await prisma.repository.create({
+      data: {
+        githubId: BigInt(Date.now() + Math.floor(Math.random() * 1000)),
+        owner: 'test-owner', name: 'claim-test', fullName: `test-owner/claim-test-${suffix}`,
+        description: null, repositoryUrl: `https://github.com/test-owner/claim-test-${suffix}`,
+        homepageUrl: null, stars: 0, forks: 0, watchers: 0, openIssues: 0,
+        license: null, primaryLanguage: null, languages: undefined, topics: [],
+        createdAt: new Date(), pushedAt: new Date(),
+        archived: false, fork: false, defaultBranch: 'main',
+      },
+    });
+    repoId = row.id;
   });
 
   it('grants a fresh claim to an unowned repository', async () => {
-    if (!process.env.DATABASE_URL) return;
     const handle = await tryClaim(prisma, repoId, 60_000);
     expect(handle).not.toBeNull();
     expect(handle!.workerId).toBe(currentWorkerId());
   });
 
   it('rejects a second concurrent worker while the claim is live', async () => {
-    if (!process.env.DATABASE_URL) return;
     const first = await tryClaim(prisma, repoId, 60_000);
     expect(first).not.toBeNull();
-    // Simulate a different worker by writing directly with a different id.
-    await prisma.$executeRawUnsafe(
-      'UPDATE "RepositoryClaimTest" SET "scanClaimId"=$1, "scanClaimExpiresAt"=$2 WHERE id=$3',
-      'other-worker', new Date(Date.now() + 60_000).toISOString(), repoId
-    );
+    // Simulate a different worker stealing the claim.
+    const cutoff = new Date(Date.now() + 60_000);
+    await prisma.repository.update({
+      where: { id: repoId },
+      data: { scanClaimId: 'other-worker', scanClaimExpiresAt: cutoff, scanClaimWorkerId: 'other-worker' },
+    });
     const second = await tryClaim(prisma, repoId, 60_000);
     expect(second).toBeNull();
   });
 
   it('allows takeover once the claim expires', async () => {
-    if (!process.env.DATABASE_URL) return;
-    await prisma.$executeRawUnsafe(
-      'UPDATE "RepositoryClaimTest" SET "scanClaimId"=$1, "scanClaimExpiresAt"=$2 WHERE id=$3',
-      'old-worker', new Date(Date.now() - 1).toISOString(), repoId
-    );
+    await prisma.repository.update({
+      where: { id: repoId },
+      data: { scanClaimId: 'old-worker', scanClaimExpiresAt: new Date(Date.now() - 1000), scanClaimWorkerId: 'old-worker' },
+    });
     const fresh = await tryClaim(prisma, repoId, 60_000);
     expect(fresh).not.toBeNull();
     expect(fresh!.workerId).toBe(currentWorkerId());
   });
 
   it('renew extends the TTL only for the owner', async () => {
-    if (!process.env.DATABASE_URL) return;
-    const handle = await tryClaim(prisma, repoId, 1_000);
-    expect(handle).not.toBeNull();
-    // Simulate someone stealing the claim by overwriting scanClaimId directly.
-    await prisma.$executeRawUnsafe(
-      'UPDATE "RepositoryClaimTest" SET "scanClaimId"=$1 WHERE id=$2',
-      'thief', repoId
-    );
+    await tryClaim(prisma, repoId, 1000);
+    await prisma.repository.update({ where: { id: repoId }, data: { scanClaimId: 'thief' } });
     const renewed = await renew(prisma, repoId, 60_000);
     expect(renewed).toBeNull();
   });
 
   it('updateIfOwner commits only when we still hold the claim', async () => {
-    if (!process.env.DATABASE_URL) return;
     await tryClaim(prisma, repoId, 60_000);
-    const ok = await updateIfOwner(prisma, repoId, { name: 'updated' });
+    const ok = await updateIfOwner(prisma, repoId, { description: 'updated-by-owner' });
     expect(ok).toBe(1);
-    // Release the claim, then update again — should not commit.
     await release(prisma, repoId);
-    const denied = await updateIfOwner(prisma, repoId, { name: 'after-release' });
+    const denied = await updateIfOwner(prisma, repoId, { description: 'after-release' });
     expect(denied).toBe(0);
-    const row = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
-      'SELECT name FROM "RepositoryClaimTest" WHERE id=$1', repoId
-    );
-    expect(row[0].name).toBe('updated');
+    const row = await prisma.repository.findUniqueOrThrow({ where: { id: repoId } });
+    expect(row.description).toBe('updated-by-owner');
+  });
+
+  it('release clears the claim so a follow-up tryClaim succeeds', async () => {
+    await tryClaim(prisma, repoId, 60_000);
+    await release(prisma, repoId);
+    // After release, a brand new tryClaim should succeed (we're not stealing from
+    // ourselves; the second one is a fresh acquisition by a now-non-owner).
+    const second = await tryClaim(prisma, repoId, 60_000);
+    expect(second).not.toBeNull();
   });
 });
