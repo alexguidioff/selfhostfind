@@ -30,16 +30,29 @@ import { buildPreserveMap, hasTransientFailure } from '@/lib/analysis-merge';
 import { runWithConcurrency } from './concurrency';
 import { sendAlert, pingHeartbeat } from '@/lib/alerts';
 import {
-  tryClaim, renew, release, currentWorkerId, updateIfOwner, applicationUpdateIfOwner,
+  tryClaim, renew, release, currentWorkerId, updateIfOwner, applicationUpdateIfOwner, WORKER_ID,
 } from './claim';
 import { parseArgs } from './refresh.args';
 
 export { parseArgs } from './refresh.args';
 
-const CONCURRENCY = Number(process.env.REFRESH_CONCURRENCY ?? 2);
-const DEFAULT_MAX_REPOS = Number(process.env.REFRESH_MAX_REPOS ?? 50);
-const STALE_AFTER_DAYS = Number(process.env.REFRESH_STALE_DAYS ?? 7);
-const RETRY_MIN_INTERVAL_DAYS = Number(process.env.REFRESH_RETRY_MIN_DAYS ?? 1);
+// Number(...) treats '' as 0, which silently disables the job (zero concurrency starts
+// no workers, zero max selects no rows). envInt() falls back to the default when the
+// variable is missing, empty, or non-numeric — the cases the workflow hits when a
+// repository variable is unset. Values <= 0 also fall through to the default so a
+// misconfigured secret can't degrade the pipeline silently.
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return n;
+}
+
+const CONCURRENCY = envInt('REFRESH_CONCURRENCY', 2);
+const DEFAULT_MAX_REPOS = envInt('REFRESH_MAX_REPOS', 50);
+const STALE_AFTER_DAYS = envInt('REFRESH_STALE_DAYS', 7);
+const RETRY_MIN_INTERVAL_DAYS = envInt('REFRESH_RETRY_MIN_DAYS', 1);
 
 // Selection order: never-scanned first (NULLS FIRST via ascending nulls first), then
 // oldest successful scan (lastScannedAt ASC NULLS FIRST), then repos whose last attempt
@@ -145,12 +158,22 @@ async function refreshWithClaim(
 ): Promise<RefreshOutcome> {
   // Renewal timer: keeps the claim alive for long analyses. Renewed TTL must outlive
   // the next renewal interval; we use ttl/2 (default 5min) so a single missed renewal
-  // still leaves us safe.
+  // still leaves us safe. A failed renewal flips the abort flag, so the next save attempt
+  // bails out instead of racing against a worker who now legitimately holds the claim.
   const ttlMs = Math.max(60_000, Number(process.env.REFRESH_CLAIM_TTL_MS ?? 10 * 60 * 1000));
-  const renewal = setInterval(() => { void renew(prisma, repo.id, ttlMs); }, Math.max(30_000, Math.floor(ttlMs / 2)));
+  let claimLost = false;
+  const renewal = setInterval(async () => {
+    const next = await renew(prisma, repo.id, ttlMs);
+    if (!next) {
+      claimLost = true;
+      console.warn(`[refresh] claim renewal failed for ${repo.fullName}; aborting`);
+    }
+  }, Math.max(30_000, Math.floor(ttlMs / 2)));
 
   try {
+    if (claimLost) throw new Error('claim renewal failed before refresh started');
     const result = await performRefresh(repo, initialExpiresAt);
+    if (claimLost) throw new Error('claim lost during refresh');
     return result;
   } catch (err) {
     // Record the failure for the next operator to see. Best-effort: if recording fails
@@ -173,10 +196,13 @@ async function performRefresh(
   const lookup = await getRepositoryById(repo.githubId);
   if (!lookup.found) {
     // Permanent disappearance: mark unreachable and clear the field that depends on a
-    // live repo. Done in a single transaction with the claim check.
+    // live repo. Done in a single transaction with the claim check (claimId AND
+    // claimExpiresAt — checking only the expiry is what the review flagged: an old
+    // worker's transaction could still see its own valid expiry if a new worker
+    // hadn't yet refreshed it, and would then write under the new worker's lease).
     const rows = await prisma.$transaction(async (tx) => {
       const r = await tx.repository.updateMany({
-        where: { id: repo.id, scanClaimExpiresAt: { gt: new Date() } },
+        where: { id: repo.id, scanClaimId: currentWorkerId(), scanClaimExpiresAt: { gt: new Date() } },
         data: {
           unreachable: true, lastVerifiedAt: new Date(),
           lastScanAttemptAt: new Date(), lastScanError: null,
@@ -239,73 +265,120 @@ async function performRefresh(
   const scores = buildScores({ repo: repoItem, analysis, classification, starsGained30d });
   const preserve = buildPreserveMap(analysis.diagnostics);
 
+  // Build per-table update payloads: Repository lives on Repository (and the per-field
+  // preservation map looks up Repository fields on existing.repository, not on the
+  // Application row), Application lives on Application. Splitting them by source is
+  // what makes the partial-update path correct under transient GitHub failures.
+  const overrides = (existing.application?.manualOverrides as Record<string, boolean> | null) ?? {};
+  const now = new Date();
+  const claimFilter = { id: repo.id, scanClaimId: WORKER_ID, scanClaimExpiresAt: { gt: now } };
+
+  const repoData: Record<string, unknown> = {
+    description: repoItem.description,
+    homepageUrl: repoItem.homepageUrl,
+    license: repoItem.license,
+    primaryLanguage: repoItem.primaryLanguage,
+    topics: repoItem.topics,
+    pushedAt: repoItem.pushedAt,
+    archived: repoItem.archived,
+    defaultBranch: repoItem.defaultBranch,
+    unreachable: false,
+    lastVerifiedAt: now,
+    lastScanAttemptAt: now,
+    lastScanError: null,
+    discoverySource: { push: repoItem.fullName },
+  };
+  // Repository fields the previous version clobbered on a transient README/release
+  // failure: stars, forks, watchers, openIssues (always fresh from GitHub), and
+  // the release/language/README fields, which now respect the preserve map.
+  for (const k of ['stars', 'forks', 'watchers', 'openIssues'] as const) repoData[k] = repoItem[k];
+
+  // GitHub-fetch-derived Repository fields: readme excerpt + languages + release. Each
+  // honors the per-field preserve map; on a transient failure, the prior value stays.
+  const existingRepo = existing as unknown as Record<string, unknown>;
+  if (preserve.readmeExcerpt === 'fresh-analysis') {
+    repoData.readmeExcerpt = analysis.result.readmeExcerpt;
+  } else {
+    const cur = existingRepo.readmeExcerpt;
+    if (cur) repoData.readmeExcerpt = cur;
+  }
+  if (preserve.languages === 'fresh-analysis') {
+    repoData.languages = analysis.result.languages ?? undefined;
+  } else {
+    const cur = existingRepo.languages;
+    if (cur) repoData.languages = cur;
+  }
+  if (preserve.latestReleaseAt === 'fresh-analysis') {
+    repoData.latestReleaseAt = analysis.result.latestReleaseAt;
+    repoData.latestReleaseTag = analysis.result.latestReleaseTag;
+  } else {
+    const curAt = existingRepo.latestReleaseAt;
+    const curTag = existingRepo.latestReleaseTag;
+    if (curAt) repoData.latestReleaseAt = curAt;
+    if (curTag) repoData.latestReleaseTag = curTag;
+  }
+
+  // Application payload: only persisted if the existing app row exists.
+  let appData: Record<string, unknown> | null = null;
+  if (existing.application) {
+    appData = buildApplicationUpdate({
+      repo: repoItem, analysis, classification,
+      existingApplication: existing.application,
+    });
+    for (const [field, status] of Object.entries(preserve)) {
+      if (status !== 'preserved-stale') continue;
+      if (overrides[field]) continue; // admin's manual value wins
+      const cur = (existing.application as unknown as Record<string, unknown>)[field];
+      // Apply preservation only when there is something real to preserve. A fresh app
+      // whose first analysis returned no README shouldn't be stuck on null forever;
+      // same for empty arrays (zero screenshots is a valid fresh value).
+      if (cur === null || cur === undefined) continue;
+      if (Array.isArray(cur) && cur.length === 0) continue;
+      appData[field] = cur;
+    }
+    for (const [k, v] of Object.entries(scoreUpdate(scores))) appData[k] = v;
+    for (const key of SCORE_FIELDS) {
+      if (overrides[key]) delete appData[key];
+    }
+  }
+
+  // Insert path: same transaction, same claim guard. Without this, a worker that lost
+  // its claim between read and insert could create an Application row for a repo
+  // another worker is also touching.
   if (!existing.application) {
-    await insertNewApplication({ repo: repoItem, analysis, classification, scores });
+    await insertNewApplication({ repo: repoItem, analysis, classification, scores, claimFilter });
     return { repo: repo.fullName, status: 'updated', reason: `health=${scores.healthScore} (new)` };
   }
 
-  const update = buildApplicationUpdate({
-    repo: repoItem, analysis, classification,
-    existingApplication: existing.application,
-  });
-  // Per-field preservation: keep the existing value of any field whose fetch failed.
-  // Manual overrides always win — even if a fetch succeeded, an admin-marked field is
-  // not touched.
-  const overrides = (existing.application.manualOverrides as Record<string, boolean> | null) ?? {};
-  for (const [field, status] of Object.entries(preserve)) {
-    if (status === 'preserved-stale' && !overrides[field]) {
-      const existingValue = (existing.application as unknown as Record<string, unknown>)[field];
-      if (existingValue !== null && existingValue !== undefined &&
-          !(Array.isArray(existingValue) && existingValue.length === 0)) {
-        update[field] = existingValue;
-      }
-    }
-  }
-  // Merge scores via scoreUpdate (renames breakdown → scoreBreakdown, etc.).
-  for (const [k, v] of Object.entries(scoreUpdate(scores))) update[k] = v;
-  for (const key of SCORE_FIELDS) {
-    if (overrides[key]) delete update[key];
-  }
-
-  // Single transaction that writes Repository + Application with a claim guard.
-  // The claim guard on both updateMany calls is redundant when they're inside one
-  // transaction, but the inner Prisma updateMany calls don't know about the claim —
-  // we use the WHERE clause to filter by a still-valid claim as the contract.
-  const now = new Date();
+  // Single transaction that writes Repository + Application with a claim guard on
+  // BOTH scanClaimId (the worker) AND scanClaimExpiresAt (still valid). Checking only
+  // the expiry was a real bug: if worker A's claim had expired and worker B had
+  // acquired a fresh one in the meantime, A's transaction could match B's expiry
+  // and write under B's lease. The id+expiry pair is the actual lock.
   const txRows = await prisma.$transaction(async (tx) => {
     const repoUpdate = await tx.repository.updateMany({
-      where: { id: repo.id, scanClaimExpiresAt: { gt: now } },
+      where: claimFilter,
       data: {
-        description: repoItem.description,
-        homepageUrl: repoItem.homepageUrl,
-        stars: repoItem.stars, forks: repoItem.forks, watchers: repoItem.watchers,
-        openIssues: repoItem.openIssues, license: repoItem.license,
-        primaryLanguage: repoItem.primaryLanguage, topics: repoItem.topics,
-        pushedAt: repoItem.pushedAt,
-        latestReleaseAt: analysis.result.latestReleaseAt,
-        latestReleaseTag: analysis.result.latestReleaseTag,
-        archived: repoItem.archived,
-        // Pull the README excerpt, languages, and defaultBranch forward — the old code
-        // did not, so a refreshed row could end up with stale README content even when
-        // we just successfully fetched it.
-        defaultBranch: repoItem.defaultBranch,
-        languages: analysis.result.languages ?? undefined,
-        readmeExcerpt: analysis.result.readmeExcerpt,
-        unreachable: false,
-        lastVerifiedAt: now,
+        ...repoData,
         lastScannedAt: now,
-        lastScanAttemptAt: now,
-        lastScanError: null,
-        discoverySource: { push: repoItem.fullName }, // provenance kept; refresh just touches
       },
     });
-    const appUpdate = await tx.application.updateMany({
-      where: { id: existing.application!.id, repositoryId: repo.id, repository: { scanClaimExpiresAt: { gt: now } } },
-      data: update,
-    });
+    const appUpdate = appData ? await tx.application.updateMany({
+      where: {
+        id: existing.application!.id,
+        repositoryId: repo.id,
+        repository: { scanClaimId: WORKER_ID, scanClaimExpiresAt: { gt: now } },
+      },
+      data: appData,
+    }) : { count: 1 };
     return { repoUpdated: repoUpdate.count, appUpdated: appUpdate.count };
   });
   if (txRows.repoUpdated === 0 || txRows.appUpdated === 0) {
+    // Detected inside the transaction by the WHERE filter; the transaction has already
+    // committed zero rows but no partial state — Prisma's $transaction with a
+    // callback is a single client-side session, so the abort is a no-op. The real
+    // guarantee is that an inconsistent write (one row updated, the other not) can't
+    // happen: the WHERE clause is identical for both.
     throw new Error('claim lost mid-transaction (race with another worker)');
   }
   return { repo: repo.fullName, status: 'updated', reason: `health=${scores.healthScore}` };
@@ -326,8 +399,14 @@ async function insertNewApplication(args: {
   analysis: AnalysisOutcome;
   classification: ReturnType<typeof classify>;
   scores: ReturnType<typeof buildScores>;
+  claimFilter: { id: string; scanClaimId: string; scanClaimExpiresAt: { gt: Date } };
 }): Promise<void> {
-  const { repo, analysis, classification, scores } = args;
+  const { repo, analysis, classification, scores, claimFilter } = args;
+  // Build the Application row from scratch (no existing row). Then write both rows
+  // inside the same transaction with the same claim guard, so a worker that loses
+  // its claim mid-way can't leave a Repository updated but no Application (or vice
+  // versa). Last scanned/attempt/error are stamped on the Repository here too, so a
+  // completed refresh is consistent across both tables.
   const update = buildApplicationUpdate({
     repo, analysis, classification,
     existingApplication: null,
@@ -335,8 +414,29 @@ async function insertNewApplication(args: {
   for (const [k, v] of Object.entries(scoreUpdate(scores))) update[k] = v;
   const { uniqueSlug } = await import('./persist');
   const slug = await uniqueSlug(prisma, repo.name);
-  await prisma.application.create({
-    data: { repositoryId: repo.id, ...update, slug } as never,
+  const now = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    // Re-check the claim inside the transaction; if it's gone, abort before creating
+    // an Application row that won't have a matching (claim-protected) Repository update.
+    const claimed = await tx.repository.findFirst({
+      where: claimFilter,
+      select: { id: true },
+    });
+    if (!claimed) {
+      throw new Error('claim lost before insert could commit');
+    }
+    await tx.repository.update({
+      where: { id: repo.id },
+      data: {
+        lastScannedAt: now,
+        lastScanAttemptAt: now,
+        lastScanError: null,
+      },
+    });
+    await tx.application.create({
+      data: { repositoryId: repo.id, ...update, slug } as never,
+    });
   });
 }
 
@@ -379,8 +479,15 @@ export async function runRefresh(argv: string[] = process.argv.slice(2)): Promis
     });
   }
 
-  if (!dryRun) {
+  // Heartbeat is only sent when at least one repo actually completed successfully.
+  // A job that picked zero repos (misconfigured MAX_REPOS) or only errored should
+  // NOT report "all good" to a dead-man's-switch monitor — that hides the problem
+  // until the monitor's grace period runs out, by which time the operator has
+  // already lost a day's worth of pipeline runs.
+  if (!dryRun && summary.scanned > 0 && summary.updated + summary.unchanged + summary.skipped > 0) {
     await pingHeartbeat();
+  } else if (!dryRun) {
+    console.warn('[refresh] no successful outcomes — skipping heartbeat to avoid a false-positive success signal');
   }
   return summary;
 }

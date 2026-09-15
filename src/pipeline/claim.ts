@@ -19,7 +19,7 @@ import { randomUUID } from 'crypto';
 import type { PrismaClient } from '@prisma/client';
 
 export const DEFAULT_TTL_MS = Number(process.env.REFRESH_CLAIM_TTL_MS ?? 10 * 60 * 1000); // 10 min
-const WORKER_ID = `${hostname()}#${process.pid}-${randomUUID().slice(0, 8)}`;
+export const WORKER_ID = `${hostname()}#${process.pid}-${randomUUID().slice(0, 8)}`;
 
 export function currentWorkerId(): string { return WORKER_ID; }
 

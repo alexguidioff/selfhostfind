@@ -53,9 +53,15 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GITHUB_TOKEN: ${{ secrets.GH_DISCOVERY_TOKEN }}
-          REFRESH_CONCURRENCY: ${{ vars.REFRESH_CONCURRENCY }}
-          REFRESH_MAX_REPOS: ${{ vars.REFRESH_MAX_REPOS }}
-          REFRESH_STALE_DAYS: ${{ vars.REFRESH_STALE_DAYS }}
+          # GitHub Actions exports repo variables as empty strings when unset;
+          # $REFRESH_MAX_REPOS='' Number('') === 0 would silently select zero repos.
+          # refresh.ts now treats empty / non-positive the same as missing, but
+          # defaulting to a non-empty placeholder at the workflow level makes the
+          # operator's intent visible in the GitHub UI and stops accidental no-ops.
+          REFRESH_CONCURRENCY: ${{ vars.REFRESH_CONCURRENCY || '2' }}
+          REFRESH_MAX_REPOS: ${{ vars.REFRESH_MAX_REPOS || '50' }}
+          REFRESH_STALE_DAYS: ${{ vars.REFRESH_STALE_DAYS || '7' }}
+          REFRESH_CLAIM_TTL_MS: ${{ vars.REFRESH_CLAIM_TTL_MS || '600000' }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
           ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
           HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}

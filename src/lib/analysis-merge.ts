@@ -1,8 +1,18 @@
 // Decides which per-field values from a fresh analyze() call should overwrite the
-// existing Application row, and which should be preserved. The previous implementation
-// always overwrote: a 503 from GitHub on the README call would have written empty strings
-// for documentationUrl, demoUrl, latestReleaseAt, etc., silently regressing an app's
-// catalog entry from "has docs" to "no docs" because of a transient outage.
+// existing rows, and which should be preserved. The previous implementation always
+// overwrote: a 503 from GitHub on the README call would have written empty strings for
+// documentationUrl, demoUrl, latestReleaseAt, etc., silently regressing an app's catalog
+// entry from "has docs" to "no docs" because of a transient outage.
+//
+// The map distinguishes Repository fields (live on the Repository row) from Application
+// fields (separate table, joined by repositoryId). The previous version mixed the two:
+// refresh.ts looked up fields like readmeExcerpt on existing.application, but
+// readmeExcerpt is a Repository column. Calling buildPreserveMap and then looking up
+// the value on the wrong table returned undefined and silently fell through to the new
+// (possibly null) value.
+//
+// `not_found` is treated as a fresh answer (the resource really is absent). Only
+// transient/auth/rate-limited statuses trigger preservation.
 
 import type { AnalysisDiagnostics } from '@/pipeline/analyze';
 
@@ -13,37 +23,54 @@ export interface PreserveOutcome {
   provenance: FieldProvenance;
 }
 
-// A field with a fresh value is overwritten; a field whose analyze() outcome failed is
-// kept from the existing Application. Manual provenance always wins (admin's call).
-// `not_found` is treated as a fresh answer (the resource really is absent) — only
-// transient/auth/rate-limited statuses trigger preservation.
+// True when the fetch for this field returned a fresh answer (ok or not_found).
+function isFresh(status: 'ok' | 'not_found' | 'rate_limited' | 'auth_error' | 'transient_error'): boolean {
+  return status === 'ok' || status === 'not_found';
+}
+
+interface FieldMeta {
+  table: 'repository' | 'application';
+  source: 'readme' | 'contents' | 'release' | 'languages';
+}
+
+// Source of truth for which column lives where and which diagnostic owns it. Both the
+// Repository write path and the Application write path look at this when deciding
+// what to overwrite vs preserve.
+const FIELD_META: Record<string, FieldMeta> = {
+  readmeExcerpt: { table: 'repository', source: 'readme' },
+  readmeFull: { table: 'repository', source: 'readme' },
+  documentationUrl: { table: 'application', source: 'readme' },
+  demoUrl: { table: 'application', source: 'readme' },
+  screenshotUrls: { table: 'application', source: 'readme' },
+  databases: { table: 'application', source: 'readme' },
+  envVars: { table: 'application', source: 'readme' },
+  ports: { table: 'application', source: 'readme' },
+  installMethods: { table: 'application', source: 'readme' },
+  containerImage: { table: 'application', source: 'readme' },
+  arm64Supported: { table: 'application', source: 'readme' },
+  amd64Supported: { table: 'application', source: 'readme' },
+  dockerSupported: { table: 'application', source: 'contents' },
+  composeSupported: { table: 'application', source: 'contents' },
+  composePath: { table: 'application', source: 'contents' },
+  languages: { table: 'repository', source: 'languages' },
+  latestReleaseAt: { table: 'repository', source: 'release' },
+  latestReleaseTag: { table: 'repository', source: 'release' },
+};
+
 export function buildPreserveMap(diagnostics: AnalysisDiagnostics): {
   [field: string]: 'fresh-analysis' | 'preserved-stale';
 } {
-  const isFreshReadme = diagnostics.readmeStatus === 'ok' || diagnostics.readmeStatus === 'not_found';
-  const isFreshContents = diagnostics.contentsStatus === 'ok' || diagnostics.contentsStatus === 'not_found';
-  const isFreshRelease = diagnostics.releaseStatus === 'ok' || diagnostics.releaseStatus === 'not_found';
-  const isFreshLanguages = diagnostics.languagesStatus === 'ok' || diagnostics.languagesStatus === 'not_found';
-  return {
-    readmeExcerpt: isFreshReadme ? 'fresh-analysis' : 'preserved-stale',
-    readmeFull: isFreshReadme ? 'fresh-analysis' : 'preserved-stale',
-    documentationUrl: isFreshReadme ? 'fresh-analysis' : 'preserved-stale',
-    demoUrl: isFreshReadme ? 'fresh-analysis' : 'preserved-stale',
-    screenshotUrls: isFreshReadme ? 'fresh-analysis' : 'preserved-stale',
-    latestReleaseAt: isFreshRelease ? 'fresh-analysis' : 'preserved-stale',
-    latestReleaseTag: isFreshRelease ? 'fresh-analysis' : 'preserved-stale',
-    dockerSupported: isFreshContents ? 'fresh-analysis' : 'preserved-stale',
-    composeSupported: isFreshContents ? 'fresh-analysis' : 'preserved-stale',
-    composePath: isFreshContents ? 'fresh-analysis' : 'preserved-stale',
-    languages: isFreshLanguages ? 'fresh-analysis' : 'preserved-stale',
-    arm64Supported: isFreshContents ? 'fresh-analysis' : 'preserved-stale',
-    amd64Supported: isFreshContents ? 'fresh-analysis' : 'preserved-stale',
-    databases: isFreshReadme ? 'fresh-analysis' : 'preserved-stale',
-    envVars: isFreshReadme ? 'fresh-analysis' : 'preserved-stale',
-    ports: isFreshReadme ? 'fresh-analysis' : 'preserved-stale',
-    installMethods: isFreshReadme ? 'fresh-analysis' : 'preserved-stale',
-    containerImage: isFreshReadme ? 'fresh-analysis' : 'preserved-stale',
+  const out: { [field: string]: 'fresh-analysis' | 'preserved-stale' } = {};
+  const statusOf: Record<'readme' | 'contents' | 'release' | 'languages', 'ok' | 'not_found' | 'rate_limited' | 'auth_error' | 'transient_error'> = {
+    readme: diagnostics.readmeStatus,
+    contents: diagnostics.contentsStatus,
+    release: diagnostics.releaseStatus,
+    languages: diagnostics.languagesStatus,
   };
+  for (const [field, meta] of Object.entries(FIELD_META)) {
+    out[field] = isFresh(statusOf[meta.source]) ? 'fresh-analysis' : 'preserved-stale';
+  }
+  return out;
 }
 
 // Returns true when at least one diagnostic indicates a non-ok outcome. Refresh uses
