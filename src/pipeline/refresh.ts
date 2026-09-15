@@ -238,6 +238,20 @@ async function performRefresh(
   const { starsGained: starsGained30d } = await computeStarsGained30d(repo.id, item.stargazers_count);
 
   const analysis = await analyzeRepository(item.owner.login, item.name, item.default_branch);
+
+  // Bail before any classification work if the inputs we depend on failed transiently.
+  // The classifier reads README for isSelfHostedApp, category keywords, nasFriendly, and
+  // many of the score components (activity via push, README length, etc.). Computing a
+  // new classification from a stale or empty README can produce a "not self-hosted"
+  // answer that excludes an existing app from the public catalog, or a worse health
+  // score that gets ranked lower in trending. The existing row stays untouched until
+  // the next refresh gets a real answer.
+  if (analysis.diagnostics.readmeStatus === 'transient_error' ||
+      analysis.diagnostics.readmeStatus === 'rate_limited' ||
+      analysis.diagnostics.readmeStatus === 'auth_error') {
+    throw new Error(`transient GitHub error during README fetch: ${analysis.diagnostics.readmeStatus}`);
+  }
+
   const classification = classify({
     name: item.name,
     description: item.description ?? '',
