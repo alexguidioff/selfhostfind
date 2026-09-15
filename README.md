@@ -345,3 +345,32 @@ The PostgreSQL regression test is opt-in locally and runs in CI. Against a **dis
 migrated database, run `TEST_DATABASE_URL=postgresql://… pnpm test`. It checks exact-match
 ranking, pagination, exclusions, filters, and parameterized search; its temporary rows
 are removed afterwards.
+
+## Categories, classification review, and comparison
+
+The catalog now includes Gaming (Game Servers / Game Libraries), Bookmarks, RSS & News,
+Automation, Analytics, and AI & LLM. Home Automation remains separate from workflow
+Automation. Category pages and filters use the same list; even empty categories are visible.
+
+The classifier gives descriptions, names and topics more weight than incidental README
+mentions. Library/SDK exclusions check product identity in both the prefilter and classifier.
+Tied or weak categories carry review reasons and cannot become automatically verified.
+The admin panel opens on pending reviews and shows the reasons; approving an app removes
+it from that queue. Explicit manual field overrides remain protected.
+
+After applying migrations, run `pnpm reclassify` to update existing catalog entries using
+stored descriptions, topics and README excerpts. This does not fetch full current READMEs,
+delete listings, or overwrite manually corrected fields. Then run `pnpm snapshot` to refresh
+scores. Normal discovery uses the new classifier for newly found and rediscovered projects.
+
+Use **Compare** on a card or app page to select two or three apps at `/compare`.
+The native form keeps selections in the URL, so comparisons can be shared without accounts.
+The table distinguishes unknown values, inferred compatibility and manual corrections.
+`/alternatives` lists replacement targets from visible catalog entries, with filterable,
+paginated pages such as `/alternatives/google-photos` and links in the sitemap.
+
+Regression tests include seven human-written summaries of real upstream projects covering
+the six new categories (source links in `src/tests/classification-corpus.ts`), plus synthetic
+ambiguity and exclusion cases. This small curated sample is not an estimate of accuracy
+across the whole catalog. PostgreSQL tests also verify that reclassification preserves
+manual corrections and that private/hidden listings do not leak into alternative pages.

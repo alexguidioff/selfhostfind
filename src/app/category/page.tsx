@@ -1,3 +1,4 @@
+import { slugify } from '@/lib/slug';
 import { buildApplicationWhere } from '@/lib/query';
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
@@ -12,12 +13,9 @@ export const metadata = {
   alternates: { canonical: '/category' },
 };
 
-function slugify(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, '-');
-}
 
 export default async function CategoryIndex() {
-  // One count query per category, in parallel. With 16 categories this is well within budget.
+  // One count query per category, in parallel. With 22 categories this is well within budget.
   const counts = await Promise.all(
     CATEGORIES.map(async (c) => ({
       name: c,
@@ -31,8 +29,7 @@ export default async function CategoryIndex() {
       }),
     })),
   );
-  // Hide empty categories from the index so the page never shows a dead link.
-  const visible = counts.filter((c) => c.count > 0);
+  const visible = counts;
   const total = visible.reduce((acc, c) => acc + c.count, 0);
 
   return (
@@ -71,7 +68,7 @@ export default async function CategoryIndex() {
         ))}
       </ul>
 
-      {visible.length === 0 && (
+      {total === 0 && (
         <p className="text-sm text-slate-500">
           No apps have been categorized yet — the catalog fills up after the first daily update.
         </p>

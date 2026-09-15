@@ -1,0 +1,25 @@
+// Human-written summaries of upstream READMEs checked 2026-09-14, not full ingestion snapshots.
+// This small regression sample covers the six additions; it is not a catalog-wide accuracy estimate.
+export const classificationCorpus = [
+  { name: 'RomM', source: 'https://github.com/rommapp/romm', category: 'Gaming', subcategory: 'Game Libraries',
+    description: 'Self-hosted ROM manager for organizing and playing a game collection.',
+    readme: 'Browse a game library, share with friends, and use browser emulators.' },
+  { name: 'Pterodactyl', source: 'https://github.com/pterodactyl/panel', category: 'Gaming', subcategory: 'Game Servers',
+    description: 'A panel for game server management using isolated Docker containers.',
+    readme: 'Manage multiplayer servers through a web interface.' },
+  { name: 'Linkwarden', source: 'https://github.com/linkwarden/linkwarden', category: 'Bookmarks', subcategory: null,
+    description: 'Self-hosted bookmark manager for saving, preserving and sharing links.',
+    readme: 'Includes a browser extension, RSS subscriptions, local AI tagging and SSO.' },
+  { name: 'FreshRSS', source: 'https://github.com/FreshRSS/FreshRSS', category: 'RSS & News', subcategory: null,
+    description: 'Self-hosted RSS reader and feed aggregator for multiple users.',
+    readme: 'Provides a CLI, mobile API and extensions.' },
+  { name: 'Activepieces', source: 'https://github.com/activepieces/activepieces', category: 'Automation', subcategory: null,
+    description: 'Open-source replacement for Zapier with a visual workflow automation builder.',
+    readme: 'Self-hosted deployment, an AI SDK, and integrations with Slack and RSS.' },
+  { name: 'Plausible', source: 'https://github.com/plausible/analytics', category: 'Analytics', subcategory: null,
+    description: 'Web analytics for measuring traffic with a simple dashboard.',
+    readme: 'Self-hosted community edition. An alternative to Google Analytics.' },
+  { name: 'Open WebUI', source: 'https://github.com/open-webui/open-webui', category: 'AI & LLM', subcategory: null,
+    description: 'Self-hosted AI platform supporting Ollama and local LLMs.',
+    readme: 'Provides plugins, API integrations and Docker installation.' },
+];

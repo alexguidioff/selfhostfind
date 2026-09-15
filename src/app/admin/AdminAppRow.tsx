@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Badge } from '@/components/Badge';
 import type { AppWithRepo } from '@/lib/types';
@@ -8,24 +9,24 @@ import { CATEGORIES } from '@/lib/constants';
 
 export function AdminAppRow({ app }: { app: AppWithRepo }) {
   const [current, setCurrent] = useState(app);
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const router = useRouter();
 
-  async function patch(body: Record<string, unknown>) {
-    const res = await fetch(`/api/admin/apps/${current.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (res.ok) {
+  async function run(body: Record<string, unknown>) {
+    setPending(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/admin/apps/${current.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('Could not save this change. Please try again.');
       const data = await res.json();
-      setCurrent(data.app);
-    }
-  }
-
-  function run(body: Record<string, unknown>) {
-    startTransition(() => {
-      patch(body);
-    });
+      setCurrent((previous) => ({ ...previous, ...data.app }));
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save this change.');
+    } finally { setPending(false); }
   }
 
   return (
@@ -35,6 +36,7 @@ export function AdminAppRow({ app }: { app: AppWithRepo }) {
       </Link>
 
       <select
+        aria-label={`Category for ${current.name}`}
         className="rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1"
         value={current.category ?? ''}
         onChange={(e) => run({ category: e.target.value || null })}
@@ -59,6 +61,10 @@ export function AdminAppRow({ app }: { app: AppWithRepo }) {
       <span className="text-slate-500">⭐ {current.repository.stars}</span>
       <span className="text-slate-500">conf. {Math.round(current.classificationConfidence * 100)}%</span>
 
+      {current.classificationReviewReasons.length > 0 && current.verificationStatus !== 'MANUALLY_VERIFIED' && (
+        <p className="w-full text-amber-700 dark:text-amber-400">Review: {current.classificationReviewReasons.join('; ')}</p>
+      )}
+      {error && <p role="alert" className="w-full text-red-600">{error}</p>}
       <div className="ml-auto flex gap-2">
         {current.verificationStatus !== 'MANUALLY_VERIFIED' && (
           <button

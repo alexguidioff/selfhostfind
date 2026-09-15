@@ -77,15 +77,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
+          <div className="mx-auto max-w-6xl px-4 py-3 flex flex-wrap gap-3 items-center justify-between">
             <Link href="/" className="font-semibold text-lg text-brand-600 dark:text-brand-500">
               SelfHostFind
             </Link>
-            <nav className="text-sm flex gap-4 text-slate-600 dark:text-slate-400" aria-label="Main">
+            <nav className="text-sm flex flex-wrap gap-x-4 gap-y-2 text-slate-600 dark:text-slate-400" aria-label="Main">
               <Link href="/?sort=trending">Trending</Link>
               <Link href="/?sort=newest">New</Link>
               <Link href="/category">Categories</Link>
               <Link href="/tag">Capabilities</Link>
+              <Link href="/alternatives">Alternatives</Link>
+              <Link href="/compare">Compare</Link>
               <Link href="/admin">Admin</Link>
             </nav>
           </div>

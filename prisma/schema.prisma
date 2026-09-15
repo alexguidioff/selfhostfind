@@ -110,6 +110,7 @@ model Application {
 
   // Provenance & trust
   classificationConfidence Float  @default(0) // 0..1
+  classificationReviewReasons String[] @default([])
   classificationSource     String @default("keyword-rules") // keyword-rules | llm | manual
   fieldSources     Json?    // per-field provenance, e.g. { "category": "keyword-rules", "databases": "readme-scan" }
   verificationStatus VerificationStatus @default(UNVERIFIED)

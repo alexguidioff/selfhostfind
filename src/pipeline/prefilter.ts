@@ -1,14 +1,10 @@
+import { nonApplicationReason } from '@/lib/classification';
 import type { GhRepoSearchItem } from '@/lib/github';
 
 export interface PrefilterResult {
   passed: boolean;
   reason: string;
 }
-
-const LIBRARY_KEYWORDS = [
-  'sdk', 'client library', 'api wrapper', 'npm package', 'python package',
-  'go module', 'rust crate', 'bindings for', 'wrapper for', 'utility library',
-];
 
 const NOT_AN_APP_KEYWORDS = [
   'awesome list', 'curated list', 'a list of', 'collection of links',
@@ -52,8 +48,8 @@ export function prefilterRepository(item: GhRepoSearchItem): PrefilterResult {
   const description = item.description ?? '';
   const name = item.name.toLowerCase();
 
-  const libHit = textContains(description, LIBRARY_KEYWORDS);
-  if (libHit) return { passed: false, reason: `looks like a library/SDK ("${libHit}")` };
+  const libReason = nonApplicationReason(item.name, description);
+  if (libReason) return { passed: false, reason: libReason };
 
   const notAppHit = textContains(description, NOT_AN_APP_KEYWORDS);
   if (notAppHit) return { passed: false, reason: `looks like a list/dotfiles/template ("${notAppHit}")` };

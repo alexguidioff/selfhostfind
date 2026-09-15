@@ -57,6 +57,7 @@ async function main() {
     const verificationStatus = resolveVerificationStatus({
       currentStatus: repo.application.verificationStatus,
       classificationConfidence: repo.application.classificationConfidence,
+      reviewReasons: repo.application.classificationReviewReasons,
       category: repo.application.category,
       license: repo.license,
       dockerSupported: repo.application.dockerSupported,

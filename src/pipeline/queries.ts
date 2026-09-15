@@ -7,7 +7,8 @@ const RECENT_PUSH = 'pushed:>2023-01-01'; // drop long-abandoned repos at the qu
 const NOT_FORK = 'fork:false';
 const MIN_STARS = 'stars:>=5'; // filters out near-empty accounts/test repos, not a popularity gate
 
-const TOPICS = ['self-hosted', 'selfhosted', 'homelab', 'nas', 'docker-compose', 'self-hosting'];
+const TOPICS = ['self-hosted', 'selfhosted', 'homelab', 'nas', 'docker-compose', 'self-hosting',
+  'game-server', 'rom-manager', 'bookmark-manager', 'rss-reader', 'workflow-automation', 'web-analytics', 'llm'];
 
 const DESCRIPTION_PHRASES = [
   '"self-hosted" in:description,readme',

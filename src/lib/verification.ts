@@ -23,6 +23,7 @@ export type VerificationStatusValue = 'UNVERIFIED' | 'AUTO_VERIFIED' | 'MANUALLY
 export interface VerificationEvidence {
   currentStatus: VerificationStatusValue;
   classificationConfidence: number;
+  reviewReasons?: string[];
   category: string | null;
   license: string | null;
   dockerSupported: boolean;
@@ -41,6 +42,7 @@ export function resolveVerificationStatus(evidence: VerificationEvidence): Verif
   if (evidence.currentStatus === 'MANUALLY_VERIFIED') return 'MANUALLY_VERIFIED';
 
   const sufficientEvidence =
+    !evidence.reviewReasons?.length &&
     !evidence.archived &&
     !evidence.unreachable &&
     evidence.classificationConfidence >= confidenceThreshold() &&

@@ -65,3 +65,8 @@ describe('prefilterRepository', () => {
     expect(prefilterRepository(makeRepo({ description: 'app' })).passed).toBe(false);
   });
 });
+
+it('does not discard a standalone app merely mentioning an SDK or library', () => {
+  expect(prefilterRepository(makeRepo({ description: 'Self-hosted bookmark manager with an SDK and a browser extension.' })).passed).toBe(true);
+  expect(prefilterRepository(makeRepo({ description: 'Self-hosted game library and ROM manager.' })).passed).toBe(true);
+});

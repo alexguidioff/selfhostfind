@@ -2,6 +2,7 @@ export const CATEGORIES = [
   'Finance', 'Photos', 'Media', 'Documents', 'Notes', 'Passwords', 'Productivity',
   'Dashboard', 'Monitoring', 'Home Automation', 'Backup', 'File Sharing',
   'Developer Tools', 'Project Management', 'Communication', 'Security',
+  'Gaming', 'Bookmarks', 'RSS & News', 'Automation', 'Analytics', 'AI & LLM',
 ] as const;
 
 export const SORT_OPTIONS = [

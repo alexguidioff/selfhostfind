@@ -25,6 +25,12 @@ const wrap = (children: IconPath) => (
 );
 
 const ICONS: Record<string, IconPath> = {
+  Gaming: wrap(<><path d="M7 8h10l3 9a2 2 0 0 1-3 2l-3-3h-4l-3 3a2 2 0 0 1-3-2z" /><path d="M6 12h4M8 10v4M16 11h.01M18 13h.01" /></>),
+  Bookmarks: wrap(<path d="M6 3h12v18l-6-4-6 4z" />),
+  'RSS & News': wrap(<><circle cx="5" cy="19" r="1" /><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16" /></>),
+  Automation: wrap(<><rect x="3" y="3" width="6" height="6" rx="1" /><rect x="15" y="15" width="6" height="6" rx="1" /><path d="M9 6h9v9M15 12l3 3 3-3" /></>),
+  Analytics: wrap(<path d="M4 3v17h17M8 16v-5M13 16V6M18 16V9" />),
+  'AI & LLM': wrap(<><rect x="5" y="5" width="14" height="14" rx="3" /><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M19 9h4M1 15h4M19 15h4M9 10h.01M15 10h.01M9 14h6" /></>),
   Finance: wrap(
     <>
       <path d="M12 2v20" />

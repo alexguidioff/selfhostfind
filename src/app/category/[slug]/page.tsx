@@ -1,3 +1,4 @@
+import { slugify } from '@/lib/slug';
 import { notFound } from 'next/navigation';
 import { getCatalogPage } from '@/lib/catalog';
 import { Pagination } from '@/components/Pagination';
@@ -9,15 +10,12 @@ import { CategoryIcon } from '@/components/CategoryIcon';
 export const dynamic = 'force-dynamic';
 
 // Map a URL slug back to its display name ("media" → "Media", "home-automation" → "Home Automation").
-function slugify(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, '-');
-}
 function unslugify(slug: string): string | undefined {
   return CATEGORIES.find((c) => slugify(c) === slug);
 }
 
 export async function generateStaticParams() {
-  // Pre-render every category at build time. With 16 categories, this is cheap and gives
+  // Pre-render every category at build time. With 22 categories, this is cheap and gives
   // search engines a fully-rendered HTML to index.
   return CATEGORIES.map((c) => ({ slug: slugify(c) }));
 }

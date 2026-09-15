@@ -173,6 +173,7 @@ export default async function AppDetailPage({ params }: { params: Promise<{ slug
         </div>
 
         <div className="flex flex-col gap-2">
+          <Link href={{ pathname: '/compare', query: { app: app.slug } }} className="rounded border border-slate-300 dark:border-slate-700 text-center py-2 text-sm font-medium">Compare with other apps</Link>
           <a href={app.repository.repositoryUrl} target="_blank" rel="noreferrer" className="rounded bg-brand-600 hover:bg-brand-700 text-white text-center py-2 text-sm font-medium">
             View on GitHub
           </a>

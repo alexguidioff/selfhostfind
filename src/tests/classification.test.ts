@@ -50,3 +50,42 @@ describe('classify', () => {
     expect(result.alternativesTo).toContain('Google Photos');
   });
 });
+
+import { classificationCorpus } from './classification-corpus';
+import { CATEGORIES } from '@/lib/constants';
+import { slugify } from '@/lib/slug';
+
+it.each(classificationCorpus)('classifies the upstream summary for $name', ({ name, description, readme, category, subcategory }) => {
+  const result = classify({ name, description, readme, topics: [] });
+  expect(result.isSelfHostedApp).toBe(true);
+  expect(result.category).toBe(category);
+  expect(result.subcategory).toBe(subcategory);
+});
+
+it('keeps strong identity ahead of incidental README features', () => {
+  const result = classify({ name: 'bookmark-hub', description: 'Self-hosted bookmark manager with an SDK.',
+    topics: ['bookmark-manager', 'self-hosted'],
+    readme: 'RSS feed reader, local AI, analytics, SSO, backup, dashboard and SDK integrations.' });
+  expect(result.isSelfHostedApp).toBe(true);
+  expect(result.category).toBe('Bookmarks');
+});
+
+it('separates home automation from service workflows and flags tied categories', () => {
+  expect(classify({ name: 'home', description: 'Self-hosted home automation for a smart home.', topics: [], readme: 'Workflow automation integrations.' }).category).toBe('Home Automation');
+  const ambiguous = classify({ name: 'hub', description: 'Self-hosted bookmarks and RSS.', topics: [], readme: '' });
+  expect(ambiguous.category).toBeNull();
+  expect(ambiguous.reviewReasons.join(' ')).toContain('ambiguous');
+  expect(ambiguous.confidence).toBeLessThanOrEqual(0.6);
+});
+
+it('does not invent an alternative from an unrelated README sentence', () => {
+  const result = classify({ name: 'app', description: 'Self-hosted dashboard.', topics: [], readme: 'An alternative dashboard. Join us on Discord.' });
+  expect(result.alternativesTo).not.toContain('Discord');
+});
+
+it('has 22 distinct categories and URL slugs', () => {
+  expect(CATEGORIES).toHaveLength(22);
+  expect(new Set(CATEGORIES.map(slugify)).size).toBe(22);
+  expect(slugify('AI & LLM')).toBe('ai-llm');
+  expect(slugify('RSS & News')).toBe('rss-news');
+});

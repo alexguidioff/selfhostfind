@@ -1,3 +1,5 @@
+import { reclassifyCatalog } from '@/pipeline/reclassify';
+import { getAlternativeProducts } from '@/lib/alternatives';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/db';
@@ -50,4 +52,43 @@ describe.skipIf(!databaseUrl)('catalog on PostgreSQL', () => {
     expect((await getCatalogPage({ q: "' OR 1=1 --" }, scope)).total).toBe(0);
     expect((await getCatalogPage({ q: 'notes storage' }, scope)).total).toBe(62);
   });
+  it('reclassifies existing apps while preserving manual corrections and queuing ambiguity', async () => {
+    const curated = await prisma.application.findUniqueOrThrow({ where: { slug: `${prefix}-0` } });
+    const ambiguous = await prisma.application.findUniqueOrThrow({ where: { slug: `${prefix}-2` } });
+    await prisma.repository.update({ where: { id: curated.repositoryId }, data: {
+      description: 'Self-hosted bookmark manager.', topics: ['self-hosted', 'bookmarks'],
+    } });
+    await prisma.application.update({ where: { id: curated.id }, data: {
+      category: 'Gaming', alternativesTo: ['Curated Service'], manualOverrides: { category: true, alternativesTo: true },
+      verificationStatus: 'MANUALLY_VERIFIED',
+    } });
+    await prisma.repository.update({ where: { id: ambiguous.repositoryId }, data: {
+      description: 'Self-hosted bookmarks and RSS.',
+    } });
+    await prisma.application.update({ where: { id: ambiguous.id }, data: { verificationStatus: 'AUTO_VERIFIED' } });
+    const selection = { id: { in: [curated.id, ambiguous.id] } };
+    await reclassifyCatalog(selection);
+    await reclassifyCatalog(selection);
+    const kept = await prisma.application.findUniqueOrThrow({ where: { id: curated.id } });
+    expect(kept.category).toBe('Gaming');
+    expect(kept.alternativesTo).toEqual(['Curated Service']);
+    expect(kept.verificationStatus).toBe('MANUALLY_VERIFIED');
+    const pending = await prisma.application.findUniqueOrThrow({ where: { id: ambiguous.id } });
+    expect(pending.category).toBeNull();
+    expect(pending.classificationReviewReasons.join(' ')).toContain('ambiguous');
+    expect(pending.verificationStatus).toBe('UNVERIFIED');
+    expect(pending.isSelfHosted).toBe(true);
+  });
+
+  it('only offers alternative pages for publicly visible applications', async () => {
+    await prisma.application.update({ where: { slug: `${prefix}-62` }, data: { alternativesTo: [`${prefix} secret`] } });
+    await prisma.application.update({ where: { slug: `${prefix}-64` }, data: { alternativesTo: [`${prefix} gone`] } });
+    const products = await getAlternativeProducts();
+    expect(products.some((product) => product.name === `${prefix} secret`)).toBe(false);
+    expect(products.some((product) => product.name === `${prefix} gone`)).toBe(false);
+    const google = products.find((product) => product.slug === 'google-photos')!;
+    const result = await getCatalogPage({}, { AND: [scope, { alternativesTo: { hasSome: google.names } }] });
+    expect(result.apps.map((app) => app.slug)).toEqual([`${prefix}-1`]);
+  });
+
 });

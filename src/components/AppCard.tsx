@@ -9,6 +9,7 @@ export function AppCard({ app }: { app: AppWithRepo }) {
   const logo = app.logoUrl ?? app.screenshotUrls[0] ?? null;
 
   return (
+    <article>
     <Link
       href={`/apps/${app.slug}`}
       className="block rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 hover:border-brand-500 transition-colors"
@@ -60,5 +61,7 @@ export function AppCard({ app }: { app: AppWithRepo }) {
         <span>Health {Math.round(app.healthScore)}</span>
       </div>
     </Link>
+    <Link href={{ pathname: '/compare', query: { app: app.slug } }} aria-label={`Compare ${app.name}`} className="inline-block text-sm underline mt-2 text-brand-600 dark:text-brand-500">Compare</Link>
+    </article>
   );
 }

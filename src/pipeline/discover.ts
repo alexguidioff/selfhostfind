@@ -10,7 +10,7 @@ import { searchRepositories, type GhRepoSearchItem } from '@/lib/github';
 import { buildDiscoveryQueries, labelForQuery } from './queries';
 import { prefilterRepository } from './prefilter';
 import { analyzeRepository, type AnalysisResult } from './analyze';
-import { classify } from '@/lib/classification';
+import { classify, classificationFields } from '@/lib/classification';
 import { computeScores } from '@/lib/scoring';
 import { resolveVerificationStatus } from '@/lib/verification';
 import { sendAlert, pingHeartbeat } from '@/lib/alerts';
@@ -194,6 +194,7 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
     const verificationStatus = resolveVerificationStatus({
       currentStatus: existingApp?.verificationStatus ?? 'UNVERIFIED',
       classificationConfidence: classification.confidence,
+      reviewReasons: classification.reviewReasons,
       category: classification.category,
       license,
       dockerSupported,
@@ -204,18 +205,16 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
     });
 
     const proposed = {
+      ...classificationFields(classification),
       name: item.name,
       shortDescription: item.description,
-      category: classification.category,
-      subcategory: classification.subcategory,
-      alternativesTo: classification.alternativesTo,
       isSelfHosted: classification.isSelfHostedApp,
-      isNasFriendly: classification.nasFriendly,
       dockerSupported,
       composeSupported: analysis.composePresent,
       composePath: analysis.composePath,
       fieldSources: {
         ...((existingApp?.fieldSources as Record<string, string> | null) ?? {}),
+        category: 'keyword-rules', subcategory: 'keyword-rules', alternativesTo: 'keyword-rules',
         dockerSupported: 'repository-files', composeSupported: 'repository-files',
         arm64Supported: 'readme-mention', amd64Supported: 'readme-mention',
         databases: 'readme-mention', ports: 'readme-scan', isNasFriendly: 'keyword-rules',
@@ -230,8 +229,6 @@ async function processCandidate(candidate: Candidate): Promise<'ok' | 'error'> {
       documentationUrl: analysis.documentationUrl,
       demoUrl: analysis.demoUrl,
       screenshotUrls: analysis.screenshotUrls,
-      classificationConfidence: classification.confidence,
-      classificationSource: 'keyword-rules',
       verificationStatus,
       ...scores,
     } as Record<string, unknown>;

@@ -1,6 +1,10 @@
 import type { MetadataRoute } from 'next';
 import { prisma } from '@/lib/db';
+import { slugify } from '@/lib/slug';
+import { getAlternativeProducts } from '@/lib/alternatives';
 import { CATEGORIES } from '@/lib/constants';
+
+export const revalidate = 300;
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://selfhostfind.vercel.app';
 
@@ -31,7 +35,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
 
   const categoryEntries: MetadataRoute.Sitemap = CATEGORIES.map((slug) => ({
-    url: `${SITE_URL}/category/${slug.toLowerCase().replace(/\s+/g, '-')}`,
+    url: `${SITE_URL}/category/${slugify(slug)}`,
     changeFrequency: 'daily',
     priority: 0.7,
   }));
@@ -85,6 +89,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: 'weekly',
       priority: 0.6,
     },
+    { url: `${SITE_URL}/alternatives`, changeFrequency: 'daily', priority: 0.7 },
+    ...(await getAlternativeProducts()).map((product) => ({ url: `${SITE_URL}/alternatives/${product.slug}`, changeFrequency: 'daily' as const, priority: 0.7 })),
     ...tagEntries,
     ...appEntries,
   ];
