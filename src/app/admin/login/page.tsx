@@ -1,10 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 export default function AdminLoginPage() {
-  const router = useRouter();
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -17,8 +15,8 @@ export default function AdminLoginPage() {
       body: JSON.stringify({ password }),
     });
     if (res.ok) {
-      router.push('/admin');
-      router.refresh();
+      // Reload after the cookie changes so prefetched routes cannot reuse the old session.
+      window.location.replace('/admin');
     } else {
       setError('Incorrect password');
     }

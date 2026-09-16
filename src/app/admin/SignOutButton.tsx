@@ -1,13 +1,10 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-
 export function SignOutButton() {
-  const router = useRouter();
   async function signOut() {
     await fetch('/api/admin/logout', { method: 'POST' });
-    router.push('/admin/login');
-    router.refresh();
+    // Reload after the cookie changes so prefetched routes cannot reuse the old session.
+    window.location.replace('/admin/login');
   }
   return (
     <button onClick={signOut} className="text-sm text-slate-500 underline">

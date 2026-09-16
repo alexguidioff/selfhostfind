@@ -10,9 +10,8 @@ updates:
       patch-and-minor:
         update-types: [patch, minor]
     open-pull-requests-limit: 5
-    # Major bumps for these packages need manual review (codegen changes, API breaks,
-    # React 19 migration, Next 15 app-router changes). Dependabot is left to suggest them
-    # — we just don't let it touch them in the same PR as other unrelated updates.
+    # Major upgrades are intentionally not opened automatically for these packages.
+    # Review and apply them explicitly, with the same required CI as any other change.
     ignore:
       - dependency-name: "@prisma/client"
         update-types: [version-update:semver-major]
@@ -41,10 +40,6 @@ updates:
         versions:
           - ">=6.a, <7.0.0"
           - ">=7.a"
-    # Only require CI for patches/minors. Major bumps will be reviewed manually anyway,
-    # so blocking them on a CI that was calibrated for the old version is just noise.
-    # (Note: `ignore` above filters which PRs open, but `rebase-strategy` here keeps the
-    # auto-merge workflow from churning on the ones that do open.)
 
   - package-ecosystem: docker
     directory: /

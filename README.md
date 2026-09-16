@@ -95,8 +95,8 @@ below for how `reconcile.ts` closes that gap.
 
 ## Local development
 
-Requires Node 22.9+ (for `--env-file-if-exists`, used by the seed/discover/snapshot
-scripts), pnpm, and a local or remote PostgreSQL instance.
+Requires Node 22.12+ (Vite 7 and the scripts’ `--env-file-if-exists` flag),
+pnpm, and a local or remote PostgreSQL instance.
 
 ```bash
 cp .env.example .env
@@ -437,5 +437,22 @@ migrations was applied outside a disposable database, inspect migration checksum
 snapshot history first; do not reset production or mark an altered migration applied blindly.
 
 Disable the refresh schedule and search collection to roll back operationally. Keep
-additive database fields in place. Runtime dependency major upgrades remain separate;
-see `SECURITY_AUDIT.md` for the verified outstanding advisories.
+additive database fields in place. The security upgrade uses Next 15, React 19 and Vitest 4; see `SECURITY_AUDIT.md`
+for the resolved versions and the scoped PostCSS override.
+
+### Framework security upgrade
+
+The tested stack is Next 15.5.25, React 19.3.0, Vitest 4.1.11 and Vite 7.3.6.
+Use Node 22.12+ and the pinned pnpm 9.15.4. The PostCSS override in package.json is
+intentional: Next 15 still pins an older vulnerable copy, while this project resolves
+that copy to the patched PostCSS 8.5 version already used by its build tooling.
+
+Docker builds now require the frozen lockfile and include the Prisma schema before
+postinstall. `.dockerignore` excludes host dependencies, previous builds and environment
+files. No database or admin credentials are needed to build the image: category and
+capability indexes and the sitemap query the deployed database at request time. These
+three endpoints no longer use the previous five-minute full-page cache.
+
+No database migration is required by this dependency upgrade. Rebuild and replace the
+web/worker images together after the usual deployment checks. A rollback to the previous
+image needs no schema rollback but restores the previously documented vulnerable packages.

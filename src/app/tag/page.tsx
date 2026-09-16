@@ -2,7 +2,8 @@ import { buildApplicationWhere } from '@/lib/query';
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
 
-export const revalidate = 300;
+// Query the deployed database at request time, not while building the image.
+export const dynamic = 'force-dynamic';
 
 export const metadata = {
   title: 'Browse by capability',

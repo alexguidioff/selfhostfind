@@ -4,7 +4,8 @@ import { slugify } from '@/lib/slug';
 import { getAlternativeProducts } from '@/lib/alternatives';
 import { CATEGORIES } from '@/lib/constants';
 
-export const revalidate = 300;
+// Query the deployed database at request time, not while building the image.
+export const dynamic = 'force-dynamic';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://selfhostfind.vercel.app';
 

@@ -5,7 +5,8 @@ import { prisma } from '@/lib/db';
 import { CATEGORIES } from '@/lib/constants';
 import { CategoryIcon } from '@/components/CategoryIcon';
 
-export const revalidate = 300;
+// Query the deployed database at request time, not while building the image.
+export const dynamic = 'force-dynamic';
 
 export const metadata = {
   title: 'All categories',

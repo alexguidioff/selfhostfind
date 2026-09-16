@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { slugify } from '@/lib/slug';
 import { notFound } from 'next/navigation';
 import { getCatalogPage } from '@/lib/catalog';
@@ -74,7 +75,7 @@ export default async function CategoryPage({ params, searchParams }: { params: P
       <Pagination page={page} pages={pages} params={query} pathname={`/category/${slug}`} />
 
       <p className="text-sm text-slate-500 mt-8">
-        <a href="/" className="underline">← All categories</a>
+        <Link href="/" className="underline">← All categories</Link>
       </p>
     </div>
   );

@@ -24,7 +24,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # 22.9+ required: seed/discover/snapshot use node's --env-file-if-exists flag.
+          # 22.12+ required: seed/discover/snapshot use node's --env-file-if-exists flag.
           node-version: 22
           cache: pnpm
 

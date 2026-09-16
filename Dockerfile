@@ -1,5 +1,5 @@
 # Multi-stage build so the runtime image (what actually runs on the NAS/homelab) stays small.
-# Node 22.9+ required: the worker target's scripts use node's --env-file-if-exists flag.
+# Node 22.12+ supports Vite 7 and the worker scripts' --env-file-if-exists flag.
 FROM node:22-alpine AS base
 # Prisma's query/migration engines need OpenSSL to be present on Alpine — without it they
 # fail at runtime with an opaque "Could not parse schema engine response" error rather than
@@ -14,7 +14,8 @@ ENV CI=true
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
-RUN pnpm install --frozen-lockfile || pnpm install
+COPY prisma/schema.prisma ./prisma/schema.prisma
+RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
 # NEXT_PUBLIC_* vars are baked into the client bundle at build time, so they MUST be

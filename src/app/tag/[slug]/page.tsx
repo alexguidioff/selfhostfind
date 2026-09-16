@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getCatalogPage } from '@/lib/catalog';
 import { Pagination } from '@/components/Pagination';
@@ -108,8 +109,8 @@ export default async function TagPage({ params, searchParams }: { params: Promis
       <Pagination page={page} pages={pages} params={query} pathname={`/tag/${slug}`} />
 
       <div className="text-sm text-slate-500 mt-8 flex gap-4">
-        <a href="/" className="underline">← Home</a>
-        <a href="/category" className="underline">All categories</a>
+        <Link href="/" className="underline">← Home</Link>
+        <Link href="/category" className="underline">All categories</Link>
       </div>
     </div>
   );
