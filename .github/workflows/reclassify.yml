@@ -1,0 +1,34 @@
+name: Reclassify catalog
+
+# Re-runs the keyword classifier over every application, preserving manual field overrides.
+# The daily refresh already reclassifies, but only repos it considers stale and only
+# REFRESH_MAX_REPOS of them per run — so after a classifier change this is how you apply it
+# to the whole catalog at once instead of waiting for the backlog to drain.
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: reclassify
+  cancel-in-progress: false
+
+jobs:
+  reclassify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Reclassify every application
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: pnpm reclassify

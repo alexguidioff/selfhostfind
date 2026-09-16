@@ -83,6 +83,25 @@ it('does not invent an alternative from an unrelated README sentence', () => {
   expect(result.alternativesTo).not.toContain('Discord');
 });
 
+// Every captured phrase becomes a public /alternatives/<slug> page and a sitemap entry, so
+// category phrases ("closed ecosystems", "popular software") must not survive detection.
+// Cases taken verbatim from junk entries the live catalog produced.
+it('keeps product names and drops category phrases after "alternative to"', () => {
+  const detect = (phrase: string) =>
+    classify({ name: 'app', description: `Self-hosted app, an alternative to ${phrase}.`, topics: [], readme: '' }).alternativesTo;
+
+  expect(detect('Splitwise and Tricount')).toEqual(['Splitwise', 'Tricount']);
+  expect(detect('Slack or Discord')).toEqual(['Slack', 'Discord']);
+  expect(detect('a Bloomberg Terminal')).toEqual(['Bloomberg Terminal']);
+  expect(detect('the official Jellyfin container')).toEqual(['Jellyfin']);
+  expect(detect('services like SendGrid or Mailgun')).toEqual(['SendGrid', 'Mailgun']);
+
+  for (const generic of ['the cloud', 'closed ecosystems', 'popular software', 'rented SaaS',
+    'fragmented monitoring stacks', 'other NAS OS', 'therefore having more control over it']) {
+    expect(detect(generic), generic).toEqual([]);
+  }
+});
+
 it('has 22 distinct categories and URL slugs', () => {
   expect(CATEGORIES).toHaveLength(22);
   expect(new Set(CATEGORIES.map(slugify)).size).toBe(22);

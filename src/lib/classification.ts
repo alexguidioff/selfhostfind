@@ -68,15 +68,20 @@ function detectAlternativesTo(text: string): string[] {
   // Explicit phrasing: "alternative to X" / "alternative to X and Y". Stops at the first
   // sentence-continuation word (not just punctuation) so "alternative to X that runs on..."
   // doesn't swallow the rest of the sentence into the captured product name.
+  //
+  // Matched against the original text, not `lower`: capitalisation is the only cheap signal
+  // separating a product ("Bloomberg Terminal") from a category phrase ("closed ecosystems",
+  // "popular software"), and productName below needs it.
   const explicit = [
-    ...lower.matchAll(
+    ...text.matchAll(
       /alternative(?:s)? to ([a-z0-9,.\s&]+?)(?:\.|,|\b(?:with|that|which|for|since|while|you|your|running|runs)\b|\n|$)/gi
     ),
   ];
   for (const m of explicit) {
-    const candidates = m[1].split(/,|\band\b|&/).map((s) => s.trim()).filter(Boolean);
+    const candidates = m[1].split(/,|\band\b|\bor\b|&/i).map((s) => s.trim()).filter(Boolean);
     for (const c of candidates) {
-      if (c.length > 1 && c.length < 40) found.add(titleCase(c));
+      const name = productName(c);
+      if (name) found.add(name);
     }
   }
 
@@ -94,6 +99,23 @@ function detectAlternativesTo(text: string): string[] {
 
 function titleCase(s: string): string {
   return s.replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+}
+
+// Names a class of software rather than a product. Anything that survives detection becomes
+// a public /alternatives/<slug> page and a sitemap entry, so a generic match is worse than
+// no match at all — precision beats recall here.
+const GENERIC_ALTERNATIVE = /^(?:saas|os|cloud|software|platforms?|ecosystems?|stacks?|vendors?|solutions?|services?|tools?|apps?|providers?|models?|containers?|systems?|clients?|nas)$/i;
+
+// Trims a captured phrase down to the capitalised run that is the actual product name, or
+// returns null when there isn't one: "the official Jellyfin container" -> "Jellyfin",
+// "services like SendGrid" -> "SendGrid", "closed ecosystems" -> null.
+function productName(raw: string): string | null {
+  const words = raw.trim().replace(/[.\s]+$/, '').split(/\s+/);
+  while (words.length && !/[A-Z]/.test(words[0])) words.shift();
+  while (words.length && !/[A-Z]/.test(words[words.length - 1])) words.pop();
+  const name = words.join(' ');
+  if (name.length < 2 || name.length > 40 || words.length > 4) return null;
+  return words.every((w) => GENERIC_ALTERNATIVE.test(w)) ? null : name;
 }
 
 const SELF_HOSTED_POSITIVE = [/self[- ]?host(?:ed|ing)/i, /host it yourself/i, /own your data/i, /run (it )?on your own server/i, /docker[ -]compose/i, /\bdocker containers?\b/i, /\bhomelab\b/i];
