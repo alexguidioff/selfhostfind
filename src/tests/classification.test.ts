@@ -100,6 +100,12 @@ it('keeps product names and drops category phrases after "alternative to"', () =
     'fragmented monitoring stacks', 'other NAS OS', 'therefore having more control over it']) {
     expect(detect(generic), generic).toEqual([]);
   }
+
+  // A lower-case mention has no capital to anchor on, so only the curated list rescues it —
+  // and it decides the display casing, which title-casing would get wrong.
+  expect(detect('bitwarden')).toEqual(['Bitwarden']);
+  expect(detect('ipfs')).toEqual(['IPFS']);
+  expect(detect('1password')).toEqual(['1Password']);
 });
 
 it('has 22 distinct categories and URL slugs', () => {

@@ -51,12 +51,15 @@ const CATEGORY_RULES: CategoryRule[] = [
 // Well-known commercial/proprietary products this catalog cares about surfacing as
 // "alternative to" — matched against explicit phrasing plus a curated name list so we
 // don't need an LLM to catch "Immich is a high performance photo... alternative to Google Photos".
+// Written the way they should be displayed; matching lower-cases both sides. Title-casing
+// them instead would surface "Ipfs" and "1password" on the public pages.
 const KNOWN_PRODUCTS = [
-  'splitwise', 'tricount', 'google photos', 'google drive', 'dropbox', 'evernote',
-  'notion', 'trello', 'asana', 'slack', 'discord', 'zoom', 'lastpass', '1password',
-  'onedrive', 'icloud', 'spotify', 'netflix', 'plex', 'gmail', 'google calendar',
-  'todoist', 'pocket', 'instapaper', 'airtable', 'google analytics', 'zapier',
-  'ifttt', 'bitwarden', 'youtube', 'medium', 'wordpress.com', 'squarespace',
+  'Splitwise', 'Tricount', 'Google Photos', 'Google Drive', 'Dropbox', 'Evernote',
+  'Notion', 'Trello', 'Asana', 'Slack', 'Discord', 'Zoom', 'LastPass', '1Password',
+  'OneDrive', 'iCloud', 'Spotify', 'Netflix', 'Plex', 'Gmail', 'Google Calendar',
+  'Todoist', 'Pocket', 'Instapaper', 'Airtable', 'Google Analytics', 'Zapier',
+  'IFTTT', 'Bitwarden', 'YouTube', 'Medium', 'WordPress.com', 'Squarespace',
+  'Ansible', 'IPFS', 'Vanta', 'Drata', 'Census', 'Hightouch', 'Featurebase', '12ft',
 ];
 
 const NAS_FRIENDLY_HINTS = [/\bnas\b/i, /\bsynology\b/i, /\bunraid\b/i, /\btruenas\b/i, /\bqnap\b/i, /\bhomelab\b/i, /\blow.?resource\b/i, /\braspberry pi\b/i, /\barm64\b/i];
@@ -88,17 +91,13 @@ function detectAlternativesTo(text: string): string[] {
   // Fallback: known product names mentioned anywhere near "alternative"/"replace"/"instead of"
   if (found.size === 0) {
     for (const product of KNOWN_PRODUCTS) {
-      if (lower.split(/[.!?\n]/).some((sentence) => sentence.includes(product) && /(alternative|replace|instead of|similar to)/i.test(sentence))) {
-        found.add(titleCase(product));
+      if (lower.split(/[.!?\n]/).some((sentence) => sentence.includes(product.toLowerCase()) && /(alternative|replace|instead of|similar to)/i.test(sentence))) {
+        found.add(product);
       }
     }
   }
 
   return [...found].slice(0, 6);
-}
-
-function titleCase(s: string): string {
-  return s.replace(/\b\w/g, (c) => c.toUpperCase()).trim();
 }
 
 // Names a class of software rather than a product. Anything that survives detection becomes
@@ -110,7 +109,15 @@ const GENERIC_ALTERNATIVE = /^(?:saas|os|cloud|software|platforms?|ecosystems?|s
 // returns null when there isn't one: "the official Jellyfin container" -> "Jellyfin",
 // "services like SendGrid" -> "SendGrid", "closed ecosystems" -> null.
 function productName(raw: string): string | null {
-  const words = raw.trim().replace(/[.\s]+$/, '').split(/\s+/);
+  const cleaned = raw.trim().replace(/[.\s]+$/, '');
+
+  // Products a README writes in lower case ("an alternative to bitwarden") have no capital to
+  // anchor on, so the curated list is what separates them from a category phrase. Matched on
+  // the whole candidate, not as a substring, so "the census data" can't sneak Census in.
+  const known = KNOWN_PRODUCTS.find((p) => p.toLowerCase() === cleaned.toLowerCase());
+  if (known) return known;
+
+  const words = cleaned.split(/\s+/);
   while (words.length && !/[A-Z]/.test(words[0])) words.shift();
   while (words.length && !/[A-Z]/.test(words[words.length - 1])) words.pop();
   const name = words.join(' ');
