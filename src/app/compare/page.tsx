@@ -15,7 +15,7 @@ export default async function ComparePage({ searchParams }: { searchParams: Prom
   // ponytail: native selects load catalog names; use server-side search if thousands of options become unwieldy.
   const [choices, selected] = await Promise.all([
     prisma.application.findMany({ where, select: { slug: true, name: true }, orderBy: [{ name: 'asc' }, { slug: 'asc' }] }),
-    prisma.application.findMany({ where: { ...where, slug: { in: slugs } }, include: { repository: true } }),
+    prisma.application.findMany({ where: { ...where, slug: { in: slugs } }, include: { repository: { omit: { readmeExcerpt: true } } } }),
   ]);
   const apps = slugs.flatMap((slug) => selected.filter((app) => app.slug === slug));
   const rows: { label: string; field?: string; value: (app: AppWithRepo) => ReactNode }[] = [

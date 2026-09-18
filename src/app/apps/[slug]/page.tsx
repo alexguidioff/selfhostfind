@@ -30,7 +30,7 @@ export default async function AppDetailPage({ params }: { params: Promise<{ slug
             slug: { not: app.slug },
             OR: [{ category: app.category }, { alternativesTo: { hasSome: app.alternativesTo } }],
           },
-          include: { repository: true },
+          include: { repository: { omit: { readmeExcerpt: true } } },
           orderBy: { healthScore: 'desc' },
           take: 4,
         })
@@ -227,7 +227,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const app = await prisma.application.findUnique({
     where: { slug },
-    include: { repository: true },
+    include: { repository: { omit: { readmeExcerpt: true } } },
   });
   if (!app) return {};
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://selfhostfind.vercel.app';

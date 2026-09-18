@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { createHash } from 'node:crypto';
 import { prisma } from './db';
 import { buildApplicationWhere } from './query';
@@ -24,8 +25,10 @@ export function groupAlternatives(apps: { id: string; alternativesTo: string[] }
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export async function getAlternativeProducts() {
+// Scans the whole catalog, and /alternatives/[slug] calls it twice per request — once in
+// generateMetadata, once in the page. cache() collapses those into one query per request.
+export const getAlternativeProducts = cache(async () => {
   return groupAlternatives(await prisma.application.findMany({
     where: buildApplicationWhere({}), select: { id: true, alternativesTo: true },
   }));
-}
+});

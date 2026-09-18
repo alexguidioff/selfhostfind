@@ -46,25 +46,25 @@ export default async function HomePage({ searchParams }: { searchParams: Promise
     prisma.application.findMany({
       where: trendingWhere,
       orderBy: [{ growthScore: 'desc' }, { healthScore: 'desc' }],
-      include: { repository: true },
+      include: { repository: { omit: { readmeExcerpt: true } } },
       take: 8,
     }),
     prisma.application.findMany({
       where: baseWhere,
       orderBy: { createdAt: 'desc' },
-      include: { repository: true },
+      include: { repository: { omit: { readmeExcerpt: true } } },
       take: 8,
     }),
     prisma.application.findMany({
       where: { ...baseWhere, repository: { ...(baseWhere.repository as object), stars: { lt: 500 } } },
       orderBy: { healthScore: 'desc' },
-      include: { repository: true },
+      include: { repository: { omit: { readmeExcerpt: true } } },
       take: 8,
     }),
     prisma.application.findMany({
       where: baseWhere,
       orderBy: { repository: { pushedAt: 'desc' } },
-      include: { repository: true },
+      include: { repository: { omit: { readmeExcerpt: true } } },
       take: 8,
     }),
   ]);

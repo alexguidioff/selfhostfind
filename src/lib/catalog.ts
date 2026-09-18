@@ -27,16 +27,16 @@ export async function getCatalogPage(params: SearchParams, scope: Prisma.Applica
     const page = Math.min(pageNumber(params), pages);
     const skip = (page - 1) * PAGE_SIZE;
     if (!prioritizeExact) {
-      const apps = await tx.application.findMany({ where, orderBy, include: { repository: true }, skip, take: PAGE_SIZE });
+      const apps = await tx.application.findMany({ where, orderBy, include: { repository: { omit: { readmeExcerpt: true } } }, skip, take: PAGE_SIZE });
       return { apps, total, page, pages };
     }
     const exactWhere = { AND: [where, exact] };
     const exactCount = await tx.application.count({ where: exactWhere });
     const first = skip < exactCount ? await tx.application.findMany({
-      where: exactWhere, orderBy, include: { repository: true }, skip, take: PAGE_SIZE,
+      where: exactWhere, orderBy, include: { repository: { omit: { readmeExcerpt: true } } }, skip, take: PAGE_SIZE,
     }) : [];
     const rest = first.length < PAGE_SIZE ? await tx.application.findMany({
-      where: { AND: [where, { NOT: exact }] }, orderBy, include: { repository: true },
+      where: { AND: [where, { NOT: exact }] }, orderBy, include: { repository: { omit: { readmeExcerpt: true } } },
       skip: Math.max(0, skip - exactCount), take: PAGE_SIZE - first.length,
     }) : [];
     return { apps: [...first, ...rest], total, page, pages };

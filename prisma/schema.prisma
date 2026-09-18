@@ -1,5 +1,9 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // `omit` lets listing queries leave Repository.readmeExcerpt behind. It is 4 KB a row and
+  // only two pages render it (truncated), so shipping it with every 60-row page was the bulk
+  // of the database egress. Preview in 5.x, stable from Prisma 6.2.
+  previewFeatures = ["omitApi"]
 }
 
 datasource db {

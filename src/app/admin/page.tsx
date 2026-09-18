@@ -15,7 +15,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const pendingWhere = { hidden: false, verificationStatus: 'UNVERIFIED' as const };
   const [apps, pendingCount] = await Promise.all([
     prisma.application.findMany({
-      where: pendingOnly ? pendingWhere : {}, include: { repository: true },
+      where: pendingOnly ? pendingWhere : {}, include: { repository: { omit: { readmeExcerpt: true } } },
       orderBy: [{ classificationConfidence: 'asc' }, { createdAt: 'desc' }], take: 100,
     }),
     prisma.application.count({ where: pendingWhere }),
