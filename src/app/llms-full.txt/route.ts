@@ -79,12 +79,14 @@ export async function GET() {
     lines.push('');
   }
 
-  // `Cache-Control` lets CDNs and AI crawlers cache the file briefly. The catalog only
-  // changes once a day, so an hour is plenty and cuts traffic on busy indexes.
+  // `max-age` alone only caches in the client, so every crawler hit still rebuilt this dump
+  // — one full-catalog read each, README excerpts included. `s-maxage` is what makes the CDN
+  // hold it, turning any amount of crawler traffic into one database read per hour. The
+  // route stays force-dynamic so the Docker image can still be built without a database.
   return new Response(lines.join('\n'), {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400',
     },
   });
 }
