@@ -2,6 +2,7 @@ import { SuggestAppLink } from '@/components/ReportLinks';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import './globals.css';
+import { Analytics } from "@vercel/analytics/next";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://selfhostfind.vercel.app';
 const SITE_NAME = 'SelfHostFind';
@@ -111,6 +112,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <p className="text-xs mt-2">Suggestions and corrections are public GitHub issues. A GitHub account is required.</p>
           </div>
         </footer>
+        <Analytics />
       </body>
     </html>
   );
