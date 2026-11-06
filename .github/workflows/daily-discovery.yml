@@ -32,11 +32,13 @@ jobs:
       - name: Apply Prisma migrations (idempotent)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL || secrets.DATABASE_URL }}
         run: pnpm prisma migrate deploy
 
       - name: Run discovery pipeline
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL || secrets.DATABASE_URL }}
           GITHUB_TOKEN: ${{ secrets.GH_DISCOVERY_TOKEN }}
           AUTO_VERIFY_CONFIDENCE_THRESHOLD: ${{ vars.AUTO_VERIFY_CONFIDENCE_THRESHOLD }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
@@ -47,6 +49,7 @@ jobs:
       - name: Reconcile catalog against GitHub (renames/archival/deletion)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL || secrets.DATABASE_URL }}
           GITHUB_TOKEN: ${{ secrets.GH_DISCOVERY_TOKEN }}
           RECONCILE_CONCURRENCY: ${{ vars.RECONCILE_CONCURRENCY }}
           SCAN_RETENTION_DAYS: ${{ vars.SCAN_RETENTION_DAYS }}
@@ -61,6 +64,7 @@ jobs:
         # the catalog is still consistent with yesterday's snapshot — keep going.
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL || secrets.DATABASE_URL }}
           GITHUB_TOKEN: ${{ secrets.GH_DISCOVERY_TOKEN }}
           # GitHub Actions exports repo variables as empty strings when unset;
           # $REFRESH_MAX_REPOS='' Number('') === 0 would silently select zero repos.
@@ -79,6 +83,7 @@ jobs:
       - name: Record metric snapshots
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL || secrets.DATABASE_URL }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
           ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
           HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL }}
@@ -90,6 +95,7 @@ jobs:
         # 30-day window the admin view relies on.
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL || secrets.DATABASE_URL }}
         run: |
           PGPASSWORD=$(echo "$DATABASE_URL" | sed -E 's|.*://[^:]+:([^@]+)@.*|\1|') \
           psql "$DATABASE_URL" -tAc "WITH d AS (DELETE FROM \"SearchAggregate\" WHERE \"dayUtc\" < NOW() - INTERVAL '30 days' RETURNING 1) SELECT count(*) FROM d;"

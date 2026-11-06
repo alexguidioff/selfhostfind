@@ -29,4 +29,5 @@ jobs:
       - name: Reclassify every application
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL || secrets.DATABASE_URL }}
         run: pnpm reclassify

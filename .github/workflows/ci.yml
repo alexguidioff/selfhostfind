@@ -24,6 +24,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://selfhostfind:ci_password@localhost:5432/selfhostfind
+      DIRECT_URL: postgresql://selfhostfind:ci_password@localhost:5432/selfhostfind
       ADMIN_PASSWORD: ci_admin_password
       ADMIN_SESSION_SECRET: ci_session_secret_at_least_32_chars_long
     steps:
